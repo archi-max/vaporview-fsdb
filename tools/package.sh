@@ -36,7 +36,7 @@ mkdir -p "$CACHE" "$OUT"
 
 say "preflight"
 for f in target/wasm32-unknown-unknown/release/filehandler.wasm src/wellen_parser/filehandler.ts node_modules/.package-lock.json LICENSE NOTICE README.md CHANGELOG.md; do
-  [ -e "$f" ] || { echo "missing $f (copy the ignored wellen files from the main checkout; run npm ci)"; exit 2; }
+  [ -e "$f" ] || { echo "missing $f (run npm ci, then npm run compile-wasm)"; exit 2; }
 done
 # the wellen wasm must be the reproducible build (tools/wellen/build-wasm.sh remaps paths; another build carries the
 # builder's home paths). Its expected SHA-1 is in that script; any other wasm is rebuilt (needs Rust + the wasm target).

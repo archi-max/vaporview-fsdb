@@ -1,6 +1,7 @@
 #!/bin/bash
 # vscode-port: adapted from cmux (GPL-3.0) scripts/waveform-viewer-checks/wellen/build-wasm.sh @ 45a845a1ab4.
-# Rebuilds target/wasm32-unknown-unknown/release/filehandler.wasm (cmux's Resources/vaporview/filehandler.wasm): VaporView's src/wellen_parser at 59107c6 (tag 1.6.1-beta) with
+# Rebuilds target/wasm32-unknown-unknown/release/filehandler.wasm from this repository's Cargo.toml, Cargo.lock and
+# src/wellen_parser as committed (HEAD; the same files as VaporView's tag 1.6.1-beta) with
 # wellen 0.25.7 + tools/wellen/wellen-0.25.7-split-bit-start.patch. Paths are remapped (the work dir to
 # /build, CARGO_HOME to /cargo), so the output is the same from any directory and any user.
 # Usage: tools/wellen/build-wasm.sh <work dir> [--unpatched] [--install]
@@ -17,7 +18,13 @@ CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
 case "$WORK" in /*) ;; *) WORK="$PWD/$WORK" ;; esac
 rm -rf "${WORK:?}/vaporview" "${WORK:?}/target"; mkdir -p "$WORK/vaporview"
 WORK="$(cd "$WORK" && pwd -P)"
-git -C "$VV" archive 59107c60c9ee5eefa95750b95369753736b77ca4 Cargo.toml Cargo.lock src/wellen_parser | tar -x -C "$WORK/vaporview"
+# The committed inputs (not the working tree), so local edits never reach the pinned build; outside a git checkout
+# (a source archive), the files as they are.
+if git -C "$VV" rev-parse --verify -q HEAD >/dev/null 2>&1; then
+  git -C "$VV" archive HEAD Cargo.toml Cargo.lock src/wellen_parser/filehandler.wit src/wellen_parser/lib.rs src/wellen_parser/libsurfer.rs | tar -x -C "$WORK/vaporview"
+else
+  (cd "$VV" && tar cf - Cargo.toml Cargo.lock src/wellen_parser/filehandler.wit src/wellen_parser/lib.rs src/wellen_parser/libsurfer.rs) | tar -x -C "$WORK/vaporview"
+fi
 # Every crate vendored (cargo's directory source in place of crates.io), wellen patched in place there: the
 # package keeps its crates.io identity, so nothing in the build depends on where the work dir is. (A path
 # dependency's package id carries its absolute path into the crate hashes, and so into the code.)
