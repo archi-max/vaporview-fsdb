@@ -7,9 +7,9 @@ repository remains the source of truth for protocol messages and semantics.
 
 ## Supported waveform files
 
-VaporView can open VCD, FST, and GHW files. FSDB is also supported when the
-optional native reader and its vendor libraries are installed; see the
-[FSDB setup instructions](GETTING_STARTED.md#optional-build-fsdb-addon).
+VaporView FSDB can open VCD, FST, GHW, FSDB and WCZ files. FSDB and WCZ are read by
+the bundled wisp-helper; see [GETTING_STARTED.md](GETTING_STARTED.md) for a development
+build.
 
 The WCP `load` command accepts a local filesystem path or `file:` URI in its
 `source` field.

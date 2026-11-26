@@ -1,112 +1,43 @@
-# Getting started
+# Getting started (development build)
 
-This is a draft
+This page covers building VaporView FSDB from source and running it in VS Code. For release VSIX files, see
+"Building" in the [README](README.md#building).
 
-## Language tools
+## Tools
 
-To get started working on Vaporview, you will need the following installed and up to date:
+- [VS Code](https://code.visualstudio.com/) (latest)
+- [Node](https://nodejs.org/en) 22
+- [Rust](https://www.rust-lang.org/) 1.93.1 with the `wasm32-unknown-unknown` target
+  (`rustup target add wasm32-unknown-unknown`), and `cargo install wasm-tools`
+- For wisp-helper (the FSDB / WCZ reader in `wisp-helper/`): a C++17 compiler with floating-point `std::to_chars`
+  (GCC 11+ or a recent clang) and zlib
 
-- [VScode - latest](https://code.visualstudio.com/)
-- [Node - 20.18.0 or later](https://nodejs.org/en)
-- [Rust - 1.90.0 or later](https://www.rust-lang.org/)
+## Build
 
-## Install libraries
-
-Once those are installed, make sure you install the necessary packages:
-
-- `npm install`
-- `cargo update`
-- `cargo install wasm-tools`
-
-Note that npm install may show errors if you do not have the build set up for building the FSDB component. You can ignore these errors, an still successfully build the extension without the FSDB component.
-
-## building and running
-
-To build and run, you should be able to use the **Run and Debug** utility in VScode. It will do the following steps automatically, but in case you need to do them individually (which does happen)
-
-### Compile WebAssembly component
-
-This compiles Rust code to a WASM binary
-
-`cargo build --target wasm32-unknown-unknown --release`
-
-Note that there are 2 types of WASM compile options: "debug" and "release". The debug version is much slower, and largely unused. This is good for general debug of functionality, but is not recommended for testing large files.
-
-### Generate WebAssembly interface
-
-This generates filehandler.ts. I opted to not check in this file since it's technically considered compiled/generated code. In the VScode extension examples, these files are checked in, and I spent an annoying amount of time trying to understand how it worked until I realized that I didn't need to understand it. In fact, the whole point of the .wit file and wit2ts tool is that we don't need to understand this file.
-
-`npm run generate:model`
-
-### "Compile" Typescript
-
-This "compiles" Typescript into Javascript.
-
-`tsc -b`
-
-## (Optional) Build FSDB addon
-
-To read FSDB, you will need to compile FSDB addon node module. This does not require you to rebuild Vaporview.
-
-### Specify FSDB reader path
-
-Modify `binding.gyp` to your path:
-
-```
-{
-  "variables": {
-    "FSDB_READER_LIBS_PATH": "/home/heyfey/verdi/2022.06/share/FsdbReader/linux64", # path to find libnffr.so, libnsys.so
-    "FSDB_HEADER_PATH": "/home/heyfey/verdi/2022.06/share/FsdbReader" # path to find ffrAPI.h, fsdbShr.h
-  },
-  ...
-}
+```sh
+npm ci
+npm run compile-wasm      # wellen's VCD / FST / GHW reader -> target/.../filehandler.wasm, and filehandler.ts
+npm run check-types
+node esbuild.js           # -> dist/
 ```
 
-For Verdi users, FSDB reader path: (please find the `.so` for your platform)
-```
-# for .so
-$VERDI_HOME/share/FsdbReader/linux64/
+`npm run compile-wasm` generates `src/wellen_parser/filehandler.ts` from the `.wit` interface (`npm run
+generate:model`) and builds the WebAssembly reader with `tools/wellen/build-wasm.sh`. That build is reproducible:
+it remaps paths, so the wasm has the same SHA-1 on every machine, and the script checks it against the pinned one.
+`npm run compile-wasm-dev` runs a plain `cargo build` instead (faster to iterate on, but its output is not the
+shipped file).
 
-# for .h
-$VERDI_HOME/share/FsdbReader/
-```
+## Run
 
-For Xcelium (xrun) users, FSDB reader might be found in:
-```
-# for .so
-$XCELIUM_HOME/tools.lnx86/lib/64bit/
+Open the folder in VS Code and use **Run and Debug** (F5). This starts an Extension Development Host with the
+extension loaded.
 
-# for .h
-$XCELIUM_HOME/include/fsdb/
-```
+FSDB and WCZ files are read by wisp-helper. Build it and point the extension at it:
 
-### Compile FSDB addon
-
-This compile the node module to read FSDB
-
-`npm run compile-addon`
-
-The node module will be in `./build/Release/`, you can simply move them to the installed extension path:
-
-```
-# Move the node modules to installed extension
-cp -r ./build/ ~/.vscode/extensions/lramseyer.vaporview-<xx.yy.zz>/
-
-# Or if you're in remote-ssh
-cp -r ./build/ ~/.vscode-server/extensions/lramseyer.vaporview-<xx.yy.zz>/
+```sh
+cd wisp-helper && make    # -> build/helper/wisp-helper; `make check` runs its checks
 ```
 
-Or package to `.vsix`
-```
-npm run package-fsdb
-vsce package
-```
-
-### Read FSDB
-
-In your VScode settings, speficy `"vaporview.fsdbReaderLibsPath"` to find the FSDB reader libs and `"vaporview.fsdbAddonPath"` to find the compiled addon plugin.
-
-e.g.
-```
-"vaporview.fsdbReaderLibsPath": "/home/heyfey/verdi/2022.06/share/FsdbReader/linux64",
-```
+Then set `"vaporview.wispHelperPath"` to the built binary in the Extension Development Host's settings. No vendor
+library is needed. Upstream VaporView's optional FSDB addon (`fsdb_reader.cpp`, built against vendor reader
+libraries) is not part of this repository.

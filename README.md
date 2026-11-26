@@ -29,8 +29,15 @@ code --install-extension vaporview-fsdb-0.1.0-universal.vsix   # macOS and Windo
 code path/to/run.fsdb
 ```
 
-With Remote-SSH, install from the remote window's terminal so the extension runs on the Linux host. Uninstall an
-earlier development build first (`unpublished-tbd.vaporview-wisp` or `unpublished-tbd.wisp`).
+With Remote-SSH, install from the remote window's terminal so the extension runs on the Linux host.
+
+**Try it** without a dump of your own: open `test/e2e/fixtures/counter.wcz` from this repository (a small counter
+waveform; the same design as `counter.vcd` and `counter.fst` next to it).
+
+**"No value":** in FSDB dumps, port copies that the file does not store show "no value (port copy …)" under the
+default settings. If a folder's simulation wrote nothing into the design from outside the logic, set
+`vaporview.wisp.outsideWrites` to `none` for that folder, and the reader computes them. Adding signals without values
+as waveform rows comes in 0.1.1.
 
 The extension keeps upstream VaporView's `vaporview.*` ids, so only one of the two can be enabled at a time.
 
@@ -123,7 +130,8 @@ Everything from VaporView also works (VCD, FST, GHW, markers, value formats, sea
 Trace Driver, Trace to Root and source-line breakpoints need the design the dump was simulated from. The design
 model (built on slang) ships prebuilt, so nothing is compiled on your machine. Give it the design in one of two ways:
 
-- **A slang profile:** pick a `.f` build file or a top level for the editor link; tracing uses the same design.
+- **A slang profile:** pick a `.f` build file or a top level for the editor link; tracing uses the same design. The
+  `.f` file must name the top level with `--top <your testbench>`.
 - **`vaporview.trace.designArgs`:** slang arguments such as `["-f", "files.f", "--top", "tb"]`, relative to
   `vaporview.trace.designRoot` (default: the workspace folder whose settings set it). A `build` entry in
   `.slang/server.json` works too.
@@ -169,7 +177,7 @@ with VaporView FSDB. Set `vaporview.trace.verdiHome` if it is not on your PATH.
 ## Building
 
 **The extension.** You need Node 22, Rust with the `wasm32-unknown-unknown` target and `cargo install wasm-tools`
-(see GETTING_STARTED.md for the details inherited from VaporView):
+(details in [GETTING_STARTED.md](GETTING_STARTED.md)):
 
 ```sh
 npm ci
