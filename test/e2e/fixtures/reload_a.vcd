@@ -1,0 +1,10 @@
+$timescale 1ns $end
+$scope module top $end
+$var wire 8 " cnt [7:0] $end
+$upscope $end
+$enddefinitions $end
+#0
+b101 "
+#10
+b1 "
+#20

@@ -1,0 +1,17 @@
+$timescale 1ns $end
+$scope module top $end
+$var wire 4 # vec [3:0] $end
+$scope module u_ram $end
+$var reg 8 ! mem[12] $end
+$var reg 8 " mem[13] $end
+$upscope $end
+$upscope $end
+$enddefinitions $end
+#0
+b1010 #
+b00010010 !
+b00010011 "
+#10
+b0101 #
+b00100010 !
+#20

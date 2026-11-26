@@ -1,0 +1,1006 @@
+import * as vscode from 'vscode';
+import { type SignalId, type NetlistId, StateChangeType, type QueueEntry, type EnumQueueEntry, type DocumentId, type SavedRowItem, VariableEncoding, type BitRangeSource, type AddVariableSignal, InitMessage, WaveformDumpMetadata, ConfigSettingsMessage, EmitEventMessage, type WebviewStateEvent } from '../common/types';
+import type { GetValuesAtTimeArgs, SignalEvent, ValuesAtTimeResult } from '../../packages/vaporview-api/types';
+import { bitRangeString, logScaleFromUnits, parseParamValue, toStringWithCommas } from '../common/functions';
+import { NetlistLinkProvider } from './terminal_links';
+import * as path from 'path';
+import type { VaporviewDocumentCollection, VaporviewDocumentDelegate } from './viewer_provider';
+import { getVarIcon, getScopeIcon, type NetlistItem } from './tree_view';
+import type { FsdbFormatHandler } from './fsdb_handler';
+import { sessionHooks } from '../cmux/session_hooks'; // vscode-port
+import { terminalLinkProviders } from '../cmux/terminal_links'; // vscode-port
+import { sortScopeChildren } from '../cmux/netlist_sort'; // vscode-port
+
+export type NetlistIdTable = NetlistItem[];
+import { pushAll } from '../common/arrays'; // vscode-port
+
+// Tracks whether the webview has initialized, and lets callers await it.
+// The webview reports 'initialized' only after both the waveform file is parsed and the
+// webview has loaded, so awaiting this covers both regardless of which finishes first.
+// The state is resettable, since the webview goes back to uninitialized on reload.
+class WebviewInitState {
+  private _initialized: boolean = false;
+  private _promise!: Promise<void>;
+  private _resolve!: () => void;
+  private _reject!: (reason: unknown) => void;
+  public get initialized(): boolean {return this._initialized;}
+
+  constructor() {this.createPromise();}
+
+  public wait(): Promise<void> { return this._promise; }
+  public cancel(reason: unknown) {this._reject(reason);}
+
+  private createPromise() {
+    this._promise = new Promise<void>((resolve, reject) => {
+      this._resolve = resolve;
+      this._reject  = reject;
+    });
+    // Mark as handled so a rejection with no waiters doesn't surface as an unhandled rejection.
+    // Callers that await the promise still receive the rejection.
+    this._promise.catch(() => {});
+  }
+  
+  public setInitialized() {
+    this._initialized = true;
+    this._resolve();
+  }
+  
+  public setNotInitialized() {
+    if (this._initialized) {this.createPromise();}
+    this._initialized = false;
+  }
+}
+
+export type SignalInfo = {
+  name: string;
+  netlistId?: NetlistId;
+  msb?: number;
+  lsb?: number;
+  dataType?: string;
+  source?: SignalInfoSource[];
+  children?: SignalInfo[];
+};
+
+export type SignalInfoSource = {
+  name: string;
+  netlistId?: NetlistId;
+  signalWidth: number;
+  msb: number;
+  lsb: number;
+};
+
+export type ParsedSignalData = SignalInfo & {
+  signalId?: SignalId;
+  signalName?: string;
+  scopePath?: string[];
+  signalWidth?: number;
+  type?: string;
+  encoding?: VariableEncoding;
+  enumType?: string;
+};
+
+export type ConvertedSignalListResult = {
+  missingSignals: string[];
+  signalList: ParsedSignalData[];
+};
+
+export type CustomVariableParseResult = {
+  dataValid: boolean;
+  signalData: ParsedSignalData;
+  missingSignals: string[];
+};
+
+// TODO: Combine with WebviewStateEvent in /common/types.ts and WebviewState class
+export type WebviewSession = {
+  extensionVersion: string | undefined;
+  markerTime?: number | null;
+  altMarkerTime?: number | null;
+  displayTimeUnit?: string;
+  selectedSignal?: { name: string; msb: number; lsb: number } | null;
+  zoomRatio?: number;
+  scrollLeft?: number;
+  defaultPixelTime?: number;
+  autoReload?: boolean;
+  displayedSignals?: SavedRowItem[] | ParsedSignalData[];
+};
+
+class WebviewState {
+  markerTime: number | null = null;
+  altMarkerTime: number | null = null;
+  displayTimeUnit: string = "ns";
+  selectedSignal: NetlistId | null = null;
+  zoomRatio: number = 1;
+  scrollLeft: number = 0;
+  defaultPixelTime: number = 1;
+  autoReload: boolean = false;
+  displayedSignals: SavedRowItem[] = [];
+}
+
+/* 
+Interface for waveform file parsers
+*/
+export interface WaveformFileParser {
+
+  // Properties
+  metadata: WaveformDumpMetadata;
+  netlistSearchable: boolean;
+
+  // Methods
+  loadNetlist(): Promise<void>;
+  loadBody(): Promise<void>;
+  unload(): Promise<void>;
+  dispose(): void;
+  getChildren(element: NetlistItem | undefined): Promise<NetlistItem[]>;
+  getSignalData(signalIdList: SignalId[]): Promise<void>;
+  getEnumData(enumList: EnumQueueEntry[]): Promise<void>;
+  getValuesAtTime(time: number, instancePaths: string[]): Promise<ValuesAtTimeResult[]>;
+  searchNetlist(searchString: string, scopeId: number, onProgress?: (msg: string) => void): Promise<NetlistSearchResult> // vscode-port: onProgress (wisp index)
+
+  // Callbacks
+  postMessageToWebview(message: Record<string, unknown>): void;
+}
+
+// #region VaporviewDocument
+export class VaporviewDocument extends vscode.Disposable implements vscode.CustomDocument {
+
+  protected disposables: vscode.Disposable[] = [];
+  public readonly uri: vscode.Uri;
+  public readonly fileType: string = 'unknown';
+  private fileWatcher: vscode.FileSystemWatcher | undefined = undefined;
+  private reloadDebounce: NodeJS.Timeout | undefined = undefined;
+  private _fileUpdated: boolean = false;
+  private _reloadPending: boolean = false;
+  public readonly documentId: DocumentId;
+  // Hierarchy
+  public treeData: NetlistItem[] = [];
+  private _netlistIdTable: NetlistIdTable = [];
+  private terminalLinkDisposable: vscode.Disposable | undefined = undefined;
+  private sortNetlist: boolean = vscode.workspace.getConfiguration('vaporview').get('sortNetlist') || false;
+  private readonly _providerDelegate: VaporviewDocumentDelegate;
+  // Format handler (composition) - always defined
+  private readonly _handler: WaveformFileParser;
+  // Webview
+  public webviewPanel: vscode.WebviewPanel | undefined = undefined;
+  private readonly _webviewInitState: WebviewInitState = new WebviewInitState();
+  public metadata: WaveformDumpMetadata;
+  public webviewContext: WebviewState = new WebviewState();
+  // State management
+  public clearDirtyStatus: boolean = false;
+  public saveFileUri: vscode.Uri | undefined = undefined;
+  public undoStack: string[] = [];
+  public redoStack: string[] = [];
+
+  constructor(
+    uri: vscode.Uri,
+    providerDelegate: VaporviewDocumentDelegate,
+    handler: WaveformFileParser,
+    documentId: DocumentId
+  ) {
+    super(() => this.dispose());
+    this.uri = uri;
+    this.documentId = documentId;
+    this.fileType = uri.fsPath.split('.').pop()?.toLocaleLowerCase() || '';
+    this._providerDelegate = providerDelegate;
+    this._handler = handler;
+    this.metadata = this._handler.metadata;
+    this.setupFileWatcher();
+  }
+
+  static async create(uri: vscode.Uri, handler: WaveformFileParser, providerDelegate: VaporviewDocumentDelegate, documentCollection: VaporviewDocumentCollection): Promise<VaporviewDocument> {
+    const fileType = uri.fsPath.split('.').pop()?.toLocaleLowerCase() || '';
+    const documentId = documentCollection.createUniqueDocumentId();
+    const document = new VaporviewDocument(uri, providerDelegate, handler, documentId);
+    documentCollection.add(documentId, document);
+    if (fileType === 'fsdb' || 'findTreeItemFn' in document._handler) { // vscode-port: also the wisp-helper handler (FSDB/WCZ)
+      (document._handler as FsdbFormatHandler).findTreeItemFn = document.findTreeItem.bind(document);
+    }
+    return document;
+  }
+
+  // #region Public getters
+  public get netlistIdTable(): NetlistIdTable { return this._netlistIdTable; }
+  public get webviewInitialized(): boolean { return this._webviewInitState.initialized; }
+
+  // Await this before sending state or signals to the webview from outside the
+  // webview lifecycle (commands, API calls). Rejects if the document is disposed first.
+  public whenWebviewInitialized(): Promise<void> { return this._webviewInitState.wait(); }
+  public get fileUpdated(): boolean { return this._fileUpdated; }
+  public get reloadPending(): boolean { return this._reloadPending; }
+  public get handler(): WaveformFileParser { return this._handler; } // vscode-port: src/cmux/data.ts reads values through it
+  public get providerDelegate(): VaporviewDocumentDelegate { return this._providerDelegate; }
+
+  public postMessageToWebview(message: Record<string, unknown>): void {
+    this.webviewPanel?.webview.postMessage(message);
+  }
+
+  // #region Handler management
+  
+  public async load(): Promise<void> {
+
+    // Load netlist first
+    const loadTime    = Date.now();
+    await this._handler.loadNetlist();
+    const netlistTime = (Date.now() - loadTime) / 1000;
+    this.treeData     = await this.getScopeChildren(undefined);
+    this._providerDelegate.updateViews(this.uri);
+    this.setSearchCommandContext();
+
+    const scopeCount     = toStringWithCommas(this._handler.metadata.scopeCount);
+    const netlistIdCount = toStringWithCommas(this._handler.metadata.netlistIdCount);
+    this._providerDelegate.logOutputChannel("Finished parsing netlist for " + this.uri.fsPath);
+    this._providerDelegate.logOutputChannel("Scope count: " + scopeCount + ", Variable count: " + netlistIdCount + ", Time: " + netlistTime + " seconds");
+
+    // Then load body
+    const bodyLoadTime = Date.now();
+    await this._handler.loadBody();
+    const bodyTime     = (Date.now() - bodyLoadTime) / 1000;
+    this.onDoneParsingWaveforms();
+
+    const timeTableCount = toStringWithCommas(Number(this.metadata.timeTableCount));
+    this._providerDelegate.logOutputChannel("Finished parsing body for " + this.uri.fsPath);
+    this._providerDelegate.logOutputChannel("Total Value Change Events: " + timeTableCount + ", Time: " + bodyTime + " seconds");
+  }
+
+  // #region Webview lifecycle
+
+  // This function requires both the webview panel to be initialized and the
+  // waveform dump file to be loaded. Both of these tasks call this function
+  // upon completion, so we need to check for both conditions.
+  public onWebviewReady(webviewPanel: vscode.WebviewPanel) {
+    this.webviewPanel = webviewPanel;
+    this._handler.postMessageToWebview = webviewPanel.webview.postMessage.bind(webviewPanel.webview);
+    //if (this._webviewInitState.initialized) { return; }
+    if (!this.metadata.timeTableLoaded) { return; }
+    this._webviewInitState.setNotInitialized();
+    const colorPalette = this._providerDelegate.getColorPalette();
+    this.setConfigurationSettings();
+    // vscode-port: a helper-backed handler (wisp) tells the viewer to start windowed before initViewport.
+    (this._handler as {beforeInitViewport?: (post: (m: Record<string, unknown>) => void) => void}).beforeInitViewport?.((m) => webviewPanel.webview.postMessage(m));
+    webviewPanel.webview.postMessage({
+      command: 'initViewport',
+      metadata: this.metadata,
+      documentId: this.documentId,
+      uri: this.uri.toString(),
+      colorPalette: colorPalette.colorPalette,
+      errorColorPalette: colorPalette.errorColorPalette,
+      themeValid: colorPalette.themeValid,
+      autoReload: this.webviewContext.autoReload,
+    } as InitMessage);
+  }
+
+  public onWebviewInitialized() {
+    this._webviewInitState.setInitialized();
+  }
+
+  public setConfigurationSettings() {
+    const config = vscode.workspace.getConfiguration('vaporview');
+
+    const customColor5 = config.get('customColor5');
+    const customColor6 = config.get('customColor6');
+    const customColor7 = config.get('customColor7');
+    const customColor8 = config.get('customColor8');
+
+    this.webviewPanel?.webview.postMessage({
+      command: 'setConfigSettings',
+      scrollingMode:                      config.get('scrollingMode'),
+      touchpadPinchSensitivity:           config.get('touchpadPinchSensitivity'),
+      rulerLines:                         config.get('showRulerLines'),
+      overrideDevicePixelRatio:           config.get('overrideDevicePixelRatio'),
+      userPixelRatio:                     config.get('userPixelRatio'),
+      fillMultiBitValues:                 config.get('fillMultiBitValues'),
+      multiBitFixedHeight:                config.get('multiBitFixedHeight'),
+      removeGlitchTransitions:            config.get('removeGlitchTransitions'),
+      defaultTimeUnit:                    config.get('defaultTimeUnit'),
+      enableAnimations:                   config.get('enableAnimations'),
+      animationDuration:                  config.get('animationDuration'),
+      useGlow:                            config.get('useGlow'),
+      disableAnalogRendererOptimizations: config.get('disableAnalogRendererOptimizations'),
+      defaultNameType:                    config.get('defaultNameType'),
+      defaultSingleBitColor:              config.get('defaultSingleBitColor'),
+      defaultMultiBitColor:               config.get('defaultMultiBitColor'),
+      defaultParamColor:                  config.get('defaultParamColor'),
+      defaultStringColor:                 config.get('defaultStringColor'),
+      defaultEnumColor:                   config.get('defaultEnumColor'),
+      defaultCustomSignalColor:           config.get('defaultCustomSignalColor'),
+      customColorPalette:                 [customColor5, customColor6, customColor7, customColor8],
+    } as ConfigSettingsMessage);
+
+    this.setTerminalLinkProvider();
+  }
+
+  public setSearchCommandContext() {
+    vscode.commands.executeCommand('setContext', 'vaporview.netlistSearchable', this._handler.netlistSearchable);
+  }
+
+  public onDoneParsingWaveforms() {
+    if (this.webviewPanel) {
+      this.onWebviewReady(this.webviewPanel);
+    }
+  }
+
+  // #region Webview state management
+  public captureWebviewState(event: WebviewStateEvent): boolean {
+
+    let isDirty = false;
+    //console.log(event.stateChangeType);
+    if (event.stateChangeType === StateChangeType.User || event.stateChangeType === StateChangeType.File) {
+      this.captureStateForUndo();
+      this.redoStack = [];
+    }
+
+    if (event.stateChangeType === StateChangeType.User) {
+      isDirty = true;
+    }
+
+    if (event.markerTime || event.markerTime === 0) {
+      this.webviewContext.markerTime = event.markerTime;
+    }
+    if (event.altMarkerTime || event.altMarkerTime === 0) {
+      this.webviewContext.altMarkerTime = event.altMarkerTime;
+    }
+    if (event.displayTimeUnit) {
+      this.webviewContext.displayTimeUnit = event.displayTimeUnit;
+    }
+
+    this.webviewContext.selectedSignal   = event.selectedSignal ?? this.webviewContext.selectedSignal;
+    this.webviewContext.displayedSignals = event.displayedSignals || this.webviewContext.displayedSignals;
+    this.webviewContext.zoomRatio        = event.zoomRatio        || this.webviewContext.zoomRatio;
+    this.webviewContext.scrollLeft       = event.scrollLeft       || this.webviewContext.scrollLeft;
+    this.webviewContext.defaultPixelTime = event.defaultPixelTime || this.webviewContext.defaultPixelTime;
+    this.webviewContext.autoReload       = event.autoReload       || this.webviewContext.autoReload;
+    this.settlePendingAdds(); // vscode-port: never add a shown signal twice
+
+    return isDirty;
+  }
+
+  public getWebviewSession() {
+    return sessionHooks.extendSession(this, { // vscode-port: cmux adds cmuxValueAliases
+      extensionVersion: vscode.extensions.getExtension('Lramseyer.vaporview')?.packageJSON.version,
+      fileName: this.uri.fsPath,
+      markerTime: this.webviewContext.markerTime,
+      altMarkerTime: this.webviewContext.altMarkerTime,
+      displayTimeUnit: this.webviewContext.displayTimeUnit,
+      selectedSignal: this.getNameFromNetlistId(this.webviewContext.selectedSignal),
+      zoomRatio: this.webviewContext.zoomRatio,
+      scrollLeft: this.webviewContext.scrollLeft,
+      defaultPixelTime: this.webviewContext.defaultPixelTime,
+      displayedSignals: this.webviewContext.displayedSignals
+    } as WebviewSession);
+  }
+
+  public async getNetlistItemFromSignalInfo(signalInfo: SignalInfo | SignalInfoSource, useNetlistId: boolean): Promise<NetlistItem | null> {
+    let metadata: NetlistItem | null = null;
+    if (useNetlistId && signalInfo.netlistId !== undefined) {
+      metadata = this.netlistIdTable[signalInfo.netlistId];
+    } else {
+      metadata = await this.findTreeItem(signalInfo.name, signalInfo.msb, signalInfo.lsb);
+    }
+    return metadata;
+  }
+
+  public async parseNetlistVariableSettings(signalInfo: SignalInfo, useNetlistId: boolean): Promise<ParsedSignalData> {
+    const metadata = await this.getNetlistItemFromSignalInfo(signalInfo, useNetlistId);
+    if (metadata !== null) {
+      const signalData = Object.assign(signalInfo, {
+        netlistId:  metadata.netlistId,
+        signalId:   metadata.signalId,
+        signalName: metadata.name,
+        scopePath:  metadata.scopePath,
+        signalWidth: metadata.width,
+        type:       metadata.type,
+        encoding:   metadata.encoding,
+        enumType:   metadata.enumType,
+        msb:        metadata.msb,
+        lsb:        metadata.lsb,
+      });
+      return signalData;
+    } else {
+      //return null;
+      const signalData = Object.assign(signalInfo, {
+        netlistId: undefined,
+        signalId: undefined,
+        signalName: signalInfo.name.split(".").pop() || "",
+        scopePath:  signalInfo.name.split(".").slice(0, -1),
+      });
+      return signalData;
+    }
+  }
+
+  public async parseCustomVariableSettings(signalInfo: SignalInfo, useNetlistId: boolean): Promise<CustomVariableParseResult> {
+    let dataValid = true;
+    const missingSignals: string[] = [];
+    const source = await Promise.all((signalInfo.source || []).map(async (item: SignalInfoSource) => {
+      const metadata = await this.getNetlistItemFromSignalInfo(item, useNetlistId);
+      const defaultSource: BitRangeSource = {
+        name: item.name,
+        netlistId: undefined,
+        signalId: undefined,
+        signalWidth: item.signalWidth,
+        msb: item.msb,
+        lsb: Math.max(item.lsb, 0),
+      };
+      if (metadata === null) {
+        dataValid = false;
+        missingSignals.push(item.name);
+        return defaultSource;
+      }
+      if (item.lsb >= metadata.width) {
+        dataValid = false;
+        missingSignals.push(item.name);
+        return defaultSource;
+      }
+      const source: BitRangeSource = {
+        name: metadata.instancePath(),
+        netlistId: metadata.netlistId,
+        signalId: metadata.signalId,
+        signalWidth: metadata.width,
+        msb: Math.min(item.msb, metadata.width - 1),
+        lsb: Math.max(item.lsb, 0),
+      };
+      return source;
+    }));
+    const signalData = Object.assign(signalInfo, {
+      encoding: VariableEncoding.BitVector,
+      source:   source,
+    });
+    return {
+      dataValid: dataValid,
+      signalData: signalData,
+      missingSignals: missingSignals,
+    };
+  }
+
+  public async convertSignalListToSettings(signalList: SignalInfo[], useNetlistId: boolean): Promise<ConvertedSignalListResult> {
+    const missingSignals: string[] = [];
+    const settings: ParsedSignalData[] = [];
+
+    if (!Array.isArray(signalList)) {
+      return { missingSignals: [], signalList: [] };
+    }
+
+    for (const signalInfo of signalList) {
+      try {
+        if (signalInfo.dataType && signalInfo.dataType === 'signal-group') {
+          const childrenSettings = await this.convertSignalListToSettings(signalInfo.children ?? [], useNetlistId);
+          const groupData = Object.assign({}, signalInfo, {children: childrenSettings.signalList});
+          settings.push(groupData);
+          pushAll(missingSignals, childrenSettings.missingSignals); // vscode-port: no spread
+        } else if (signalInfo.dataType && signalInfo.dataType === 'signal-separator') {
+          settings.push(signalInfo);
+        } else if (signalInfo.dataType && signalInfo.dataType === 'custom-variable') {
+          const result = await this.parseCustomVariableSettings(signalInfo, useNetlistId);
+          settings.push(result.signalData);
+          if (!result.dataValid) {
+            pushAll(missingSignals, result.missingSignals); // vscode-port: no spread
+          }
+        } else if (signalInfo.dataType === 'netlist-variable' || signalInfo.dataType === undefined) {
+          const signalData = await this.parseNetlistVariableSettings(signalInfo, useNetlistId);
+          if (signalData !== null) {
+            settings.push(signalData);
+          } else {
+            missingSignals.push(signalInfo.name);
+          }
+        }
+      } catch (e) {
+        console.error('Error parsing signal list:', e);
+      }
+    }
+
+    return {
+      missingSignals: missingSignals,
+      signalList: settings,
+    };
+  }
+
+  public async applySessionState(session: WebviewSession, stateChangeType: StateChangeType, useNetlistId: boolean) {
+    sessionHooks.beforeApplySession(this, session, stateChangeType); // vscode-port: alias files first
+
+    //this.netlistTreeDataProvider.loadDocument(document);
+    //console.log('applySessionState', session);
+    const signalListSettings = await this.convertSignalListToSettings((session.displayedSignals || []) as unknown as SignalInfo[], useNetlistId);
+    //console.log('signalListSettings', signalListSettings);
+    const documentState: WebviewSession = {
+      extensionVersion: session.extensionVersion,
+      displayedSignals: signalListSettings.signalList,
+      markerTime: session.markerTime,
+      altMarkerTime: session.altMarkerTime,
+      displayTimeUnit: session.displayTimeUnit,
+      selectedSignal: session.selectedSignal,
+      zoomRatio: session.zoomRatio,
+      scrollLeft: session.scrollLeft,
+      defaultPixelTime: session.defaultPixelTime,
+      autoReload: session.autoReload,
+    };
+
+    //console.log(stateChangeType);
+
+    this.webviewPanel?.webview.postMessage({
+      command: 'apply-state',
+      state: documentState,
+      stateChangeType: stateChangeType,
+    });
+
+    if (signalListSettings.missingSignals.length > 0) {
+      this._providerDelegate.logOutputChannel('Missing signals: '+ signalListSettings.missingSignals.join(', '));
+    }
+  }
+
+  captureStateForUndo() {
+    this.undoStack.push(JSON.stringify(this.webviewContext));
+    if (this.undoStack.length > 50) {
+      this.undoStack.shift();
+    }
+    this.redoStack = [];
+  }
+
+  undo() {
+    if (this.undoStack.length === 0) {return;}
+    const lastState = this.undoStack.pop();
+    this.redoStack.push(JSON.stringify(this.webviewContext));
+    this.applySessionState(JSON.parse(lastState || '{}'), StateChangeType.Undo, false);
+  }
+  
+  redo() {
+    if (this.redoStack.length === 0) {return;}
+    const lastState = this.redoStack.pop();
+    this.undoStack.push(JSON.stringify(this.webviewContext));
+    this.applySessionState(JSON.parse(lastState || '{}'), StateChangeType.Redo, false);
+  }
+
+  // #region File watching
+
+  private setupFileWatcher() {
+    if (this.uri.scheme !== 'file') { return; }
+
+    const settings = vscode.workspace.getConfiguration('vaporview');
+    const pattern = new vscode.RelativePattern(path.dirname(this.uri.fsPath), path.basename(this.uri.fsPath));
+    const watcher = vscode.workspace.createFileSystemWatcher(pattern);
+    this.webviewContext.autoReload = settings.get('defaultAutoReload') || false;
+    const scheduleReload = () => {
+      if (this.reloadDebounce) { clearTimeout(this.reloadDebounce); }
+      this.reloadDebounce = setTimeout(() => this.handleUpdateFile(), 500);
+      this._fileUpdated = true;
+    };
+
+    watcher.onDidChange(scheduleReload, this, this.disposables);
+    this.disposables.push(watcher);
+    this.fileWatcher = watcher;
+  }
+
+  private handleUpdateFile() {
+    this._providerDelegate.logOutputChannel("File changed: " + this.uri.fsPath);
+    if (this.webviewContext.autoReload && this._fileUpdated) {
+      this._reloadPending = true;
+      if (this.webviewPanel?.active) {
+        vscode.commands.executeCommand('vaporview.reloadFile', this.uri);
+      }
+    }
+  }
+
+  // #region Netlist helpers
+
+  public sortNetlistScopeChildren(netlistItems: NetlistItem[]) {
+    // vscode-port: no push(...spread) over a scope's children (stack overflow on ~100K+ children): src/cmux/netlist_sort.ts
+    return sortScopeChildren(netlistItems as Array<NetlistItem & { contextValue?: string }>, this.sortNetlist);
+  }
+
+  protected setTerminalLinkProvider() {
+    const enableTerminalLinks = vscode.workspace.getConfiguration('vaporview').get('enableInstancePathTerminalLinks') || false;
+    if (!enableTerminalLinks) {
+      this.unsetTerminalLinkProvider();
+    } else if (!this.terminalLinkDisposable) {
+      const scopeTopNames = this.treeData.filter(item => item.contextValue === 'netlistScope').map((item) => item.name);
+      const terminalLinkProvider = new NetlistLinkProvider(this._providerDelegate, scopeTopNames);
+      this.terminalLinkDisposable = vscode.Disposable.from(vscode.window.registerTerminalLinkProvider(terminalLinkProvider), {dispose: () => terminalLinkProviders.netlist.delete(terminalLinkProvider)}); // vscode-port: e2e list of live providers
+    }
+  }
+
+  private unsetTerminalLinkProvider() {
+    if (this.terminalLinkDisposable) {
+      this.terminalLinkDisposable.dispose();
+      this.terminalLinkDisposable = undefined;
+    }
+  }
+
+  // #region Public API
+
+  public reveal() {
+    if (!this.webviewPanel) { return; }
+    this.webviewPanel.reveal(vscode.ViewColumn.Active);
+  }
+
+  public formatTime(time: number, unit: string) {
+    const timescaleOffset = logScaleFromUnits(this.metadata.timeUnit) - logScaleFromUnits(unit);
+    const timeScaleOffsetInverse = logScaleFromUnits(unit) - logScaleFromUnits(this.metadata.timeUnit);
+    let timeValue;
+    if (timescaleOffset > 0) {
+      timeValue = time * this.metadata.timeScale * (10 ** timescaleOffset);
+    } else {
+      timeValue = time * this.metadata.timeScale / (10 ** timeScaleOffsetInverse);
+    }
+    const strings = timeValue.toString().split('.');
+    strings[0] = strings[0].replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    return strings.join('.') + ' ' + unit;
+  }
+
+  public async findTreeItem(scopePath: string | undefined, msb: number | undefined, lsb: number | undefined): Promise<NetlistItem | null> {
+    if (!scopePath) { return null; }
+    const pathArray = scopePath.split('.');
+    const module    = this.treeData.find((element) => element.label === pathArray[0]);
+    if (!module) { return null; }
+    return await module.findChild(pathArray.slice(1), this, msb, lsb);
+  }
+
+  public getNameFromNetlistId(netlistId: NetlistId | null) {
+    if (netlistId === null) { return null; }
+    const netlistData = this.netlistIdTable[netlistId];
+    const msb = netlistData?.msb;
+    const lsb = netlistData?.lsb;
+    return {
+      name: netlistData?.instancePath(),
+      msb: msb,
+      lsb: lsb,
+    };
+  }
+
+  public getDisplayedNetlistIds(): NetlistId[] {
+    return this.getNetlistIdsFromDisplayedSignals(this.webviewContext.displayedSignals);
+  }
+
+  public getNetlistIdsFromDisplayedSignals(displayedSignals: SavedRowItem[]): NetlistId[] {
+    // vscode-port: iterative, in display order (no recursion over groups, no push(...spread)).
+    const result: NetlistId[] = [];
+    const stack: SavedRowItem[] = displayedSignals.slice().reverse();
+    while (stack.length) {
+      const element = stack.pop()!;
+      if (element.dataType === 'netlist-variable' && element.netlistId !== undefined) {
+        result.push(element.netlistId);
+      } else if (element.dataType === 'signal-group') {
+        const kids = element.children ?? [];
+        for (let i = kids.length - 1; i >= 0; i--) { stack.push(kids[i]); }
+      }
+    }
+    return result;
+  }
+
+  public isSignalDisplayed(netlistId: NetlistId | null | undefined): boolean {
+    if (netlistId === null || netlistId === undefined) { return false; }
+    const displayed = this.getDisplayedNetlistIds();
+    return displayed.includes(netlistId);
+  }
+
+  // vscode-port: a signal already shown (or whose add is on its way to the webview) is never added again.
+  // An add is pending until a webview context shows it, or for 10 s if the webview never does.
+  private pendingAdds = new Map<NetlistId, number>();
+  private settlePendingAdds() {
+    if (!this.pendingAdds.size) { return; }
+    const shown = new Set(this.getDisplayedNetlistIds());
+    const now = Date.now();
+    this.pendingAdds.forEach((t, id) => { if (shown.has(id) || now - t > 10000) { this.pendingAdds.delete(id); } });
+  }
+  public filterNewSignals(netlistIdList: NetlistId[]): NetlistId[] {
+    this.settlePendingAdds();
+    const shown = new Set(this.getDisplayedNetlistIds());
+    const out: NetlistId[] = [];
+    netlistIdList.forEach((id) => { if (!shown.has(id) && !this.pendingAdds.has(id) && !out.includes(id)) { out.push(id); } });
+    return out;
+  }
+
+  public async renderSignals(netlistIdList: NetlistId[], moveToGroup: string[] | undefined, index: number | undefined, selectLast = false) { // vscode-port: selectLast
+    const signalList: AddVariableSignal[] = [];
+    if (!this.webviewPanel) { return; }
+    netlistIdList = this.filterNewSignals(netlistIdList); // vscode-port
+    if (netlistIdList.length === 0) { return; } // vscode-port
+    const addedAt = Date.now(); // vscode-port
+    netlistIdList.forEach((id) => { this.pendingAdds.set(id, addedAt); }); // vscode-port
+
+    const instancePathList: string[] = [];
+
+    const unavailable: string[] = []; // vscode-port: declared signals the file holds no values for
+    netlistIdList.forEach((netlistId) => {
+      const metadata = this.netlistIdTable[netlistId];
+      if (!metadata) { return; }
+      const noValues = (metadata as {unavailable?: {reason: string}}).unavailable;
+      if (noValues) { unavailable.push(metadata.instancePath() + ': ' + noValues.reason); return; }
+
+      instancePathList.push(metadata.instancePath());
+      signalList.push({
+        signalId: metadata.signalId,
+        signalWidth: metadata.width,
+        signalName: metadata.name,
+        scopePath: metadata.scopePath,
+        netlistId: metadata.netlistId,
+        type: metadata.type,
+        encoding: metadata.encoding,
+        enumType: metadata.enumType,
+        msb: metadata.msb,
+        lsb: metadata.lsb,
+      });
+    });
+
+    if (unavailable.length > 0) { // vscode-port
+      const noValuesMsg = 'No values in this file for ' + unavailable.slice(0, 3).join('; ') + (unavailable.length > 3 ? ` (and ${unavailable.length - 3} more)` : '');
+      vscode.window.showWarningMessage(noValuesMsg);
+      (this._handler as {noteMessage?: (m: string) => void}).noteMessage?.(noValuesMsg);
+      if (signalList.length === 0) { return; }
+    }
+    this.webviewPanel.webview.postMessage({
+      command: 'add-variable',
+      signalList: signalList,
+      groupPath: moveToGroup,
+      index: index,
+      selectLast: selectLast || undefined, // vscode-port: coalesced single adds select the last row only, as one-by-one adds do
+    });
+
+    const eventData: SignalEvent = {
+      uri: this.uri.toString(),
+      instancePath: instancePathList,
+      netlistId: netlistIdList,
+      source: 'webview',
+    };
+
+    this._providerDelegate.emitEvent({
+      command: 'emitEvent',
+      eventType: 'addVariable',
+      eventData: eventData,
+    } as EmitEventMessage);
+  }
+
+  // vscode-port: the windowed viewer's protocol-v2 requests (window_cache.ts), answered by the handler's reader.
+  public relayV2(req: unknown) {
+    const relay = (this._handler as {relayV2?: (req: unknown, post: (m: Record<string, unknown>) => void) => Promise<void>}).relayV2;
+    const panel = this.webviewPanel;
+    if (!relay || !panel) {return;}
+    relay.call(this._handler, req, (m) => {panel.webview.postMessage(m);}).catch((e) => {
+      this._providerDelegate.logOutputChannel('v2 relay: ' + e);
+      const id = (req as {id?: unknown})?.id;
+      panel.webview.postMessage({command: 'v2-reply', reply: {id, error: String(e)}});
+    });
+  }
+
+  public fetchData(requestList: QueueEntry[]) {
+    const signalIdList: SignalId[] = [];
+    const enumList: EnumQueueEntry[] = [];
+    requestList.forEach((entry) => {
+      if (entry.type === 'signal') {
+        signalIdList.push(entry.signalId);
+      } else if (entry.type === 'enum') {
+        enumList.push(entry);
+      }
+    });
+    if (enumList.length > 0) {
+      this.getEnumData(enumList);
+    }
+    if (signalIdList.length === 0) { return; }
+    this.getSignalData(signalIdList);
+  }
+
+  public revealSignalInWebview(netlistId: NetlistId) {
+    if (!this.webviewPanel) { return; }
+
+    this.webviewPanel.webview.postMessage({
+      command: 'setSelectedSignal',
+      netlistId: netlistId
+    });
+  }
+
+  public removeSignalFromWebview(netlistId: NetlistId | undefined, rowId: number | undefined, removeAllSelected: boolean) {
+    if (!this.webviewPanel) { return; }
+
+    this.webviewPanel.webview.postMessage({
+      command: 'remove-signal',
+      netlistId: netlistId,
+      rowId: rowId,
+      removeAllSelected: removeAllSelected
+    });
+  }
+
+  public async unloadTreeData() {
+    this.treeData = [];
+    this._netlistIdTable = [];
+  }
+
+  public async unloadWebview() {
+    this._webviewInitState.setNotInitialized();
+    if (!this.webviewPanel) { return; }
+    try {
+      this.webviewPanel?.webview.postMessage({ command: 'unload' });
+    } catch (e) {
+      // This can happen if the webview has already been disposed of
+    }
+  }
+
+  public async reload() {
+    sessionHooks.onReload(this); // vscode-port: the data generation bumps on a real reload, not on 'ready'
+    this.sortNetlist = vscode.workspace.getConfiguration('vaporview').get('sortNetlist') || false;
+    await this.unload();
+    await this.load();
+    this._fileUpdated = false;
+    this._reloadPending = false;
+  }
+
+  // #region Handler delegated methods
+
+  public async getScopeChildren(element: NetlistItem | undefined): Promise<NetlistItem[]> {
+    const children       = await this._handler.getChildren(element);
+    const sortedChildren = this.sortNetlistScopeChildren(children);
+    if (element !== undefined) { element.children = sortedChildren; }
+    children.forEach((child) => {
+      this._netlistIdTable[child.netlistId] = child;
+    });
+    return sortedChildren;
+  }
+
+  public async getSignalData(signalIdList: SignalId[]): Promise<void> {
+    return this._handler.getSignalData(signalIdList);
+  }
+
+  public async getEnumData(enumNameList: EnumQueueEntry[]): Promise<void> {
+    return this._handler.getEnumData(enumNameList);
+  }
+
+  public async getValuesAtTime(e: GetValuesAtTimeArgs): Promise<ValuesAtTimeResult[]> {
+    const time = e.time ?? this.webviewContext.markerTime ?? 0;
+    return this._handler.getValuesAtTime(time, e.instancePaths);
+  }
+
+  public searchNetlist(searchQuery: string, scopeId: number | undefined, onProgress?: (msg: string) => void): Promise<NetlistSearchResult> {
+    return this._handler.searchNetlist(searchQuery, scopeId ?? 0xFFFFFFFF, onProgress);
+  }
+
+  public async unload(): Promise<void> {
+    this.metadata.timeTableLoaded = false;
+    this.unloadWebview();
+    this.unloadTreeData();
+    await this._handler.unload();
+  }
+
+  public dispose(): void {
+    this._webviewInitState.cancel(new Error('Viewer was closed before it finished initializing: ' + this.uri.toString()));
+    this._handler.dispose();
+    this._providerDelegate.updateViews(this.uri);
+    this._providerDelegate.removeFromCollection(this.uri, this);
+    this.unsetTerminalLinkProvider();
+    this.disposables.forEach((disposable) => { disposable.dispose(); });
+    this.disposables = [];
+    // vscode-port: drop the netlist so a closed document holds no NetlistItems, whoever still references it.
+    this.treeData = [];
+    this._netlistIdTable = [];
+  }
+}
+
+export type NetlistSearchResult = {
+  totalResults: number
+  searchResults: NetlistSearchEntry[]
+}
+
+export type NetlistSearchEntry = {
+  instancePath: string
+  type: string
+  isVar: boolean
+  paramValue: string
+  msb: number
+  lsb: number
+}
+
+interface NetlistQuickPickItem extends vscode.QuickPickItem {
+  instancePath: string;
+  isVar: boolean;
+  msb: number;
+  lsb: number;
+}
+
+export class NetlistSearchQuickPick {
+
+  private readonly quickPick: vscode.QuickPick<NetlistQuickPickItem>;
+  private document: VaporviewDocument | undefined;
+  private searchInProgress = false;
+  private pendingQuery: string | undefined;
+  private searchScopeId: number | undefined;
+  private searchScopeName: string = "Top Level";
+  private searchScopeTextLength: number = 0;
+
+  constructor() {
+    this.quickPick = vscode.window.createQuickPick<NetlistQuickPickItem>();
+    this.quickPick.placeholder = 'Search netlist by instance path...';
+    this.quickPick.matchOnDetail = true;
+    this.quickPick.busy = false;
+    this.quickPick.onDidHide(() => {this.quickPick.value = "";});
+
+    this.quickPick.onDidChangeValue((value) => this.applyFilter(value));
+    this.quickPick.onDidAccept(() => this.onAccept());
+  }
+
+  public show(document: VaporviewDocument, scopeId: number | undefined) {
+    this.document = document;
+    this.pendingQuery = undefined;
+    this.searchInProgress = false;
+    this.updateSearchScope(scopeId);  
+    this.quickPick.placeholder = this.searchScopeName;
+    this.quickPick.show();
+  }
+
+  private updateSearchScope(scopeId: number | undefined) {
+    this.searchScopeId = scopeId;
+    this.searchScopeTextLength = 0;
+    if (!scopeId) {this.searchScopeName = "Searching Top Level:"; return;}
+    const scope = this.document?.getNameFromNetlistId(scopeId);
+    if (!scope) {this.searchScopeName = "Searching Unknown Scope:"; return;}
+    this.searchScopeName = "Searching " + scope.name + ":";
+    this.searchScopeTextLength = scope.name.length;
+  }
+
+  private async applyFilter(query: string) {
+    if (!this.document) {return;}
+    if (!query) {
+      this.quickPick.items = [];
+      this.quickPick.title = undefined;
+      this.quickPick.busy  = false;
+      return;
+    }
+
+    if (this.searchInProgress) {
+      this.pendingQuery = query;
+      return;
+    }
+
+    this.searchInProgress  = true;
+    this.quickPick.busy    = true;
+    // vscode-port: a wisp file's first search builds its name index; the title shows how far it got
+    const searchResult     = await this.document.searchNetlist(query, this.searchScopeId, (msg) => {this.quickPick.title = `${this.searchScopeName} ${msg}`;});
+    this.searchInProgress  = false;
+
+    const totalResults     = searchResult.totalResults;
+    const displayedResults = searchResult.searchResults.length;
+    const resultString     = totalResults === 1 ? "result" : "results";
+
+    if (totalResults === 0) {
+      this.quickPick.title = `${this.searchScopeName} No results found`;
+    } else if (displayedResults !== totalResults) {
+      this.quickPick.title = `${this.searchScopeName} Showing ${displayedResults} of ${totalResults} ${resultString}`;
+    } else {
+      this.quickPick.title = `${this.searchScopeName} ${totalResults} ${resultString}`;
+    }
+
+    const elipsis        = this.searchScopeTextLength > 0 ? ".." : "";
+    this.quickPick.items = searchResult.searchResults.map(result => {
+      const icon       = result.isVar ? getVarIcon(result.type) : getScopeIcon(result.type);
+      const bitRange   = result.isVar ? bitRangeString(result.msb, result.lsb, true) : "";
+      const paramValue = result.paramValue ? ": " + parseParamValue(result.paramValue) : "";
+      const detail     = result.instancePath.slice(this.searchScopeTextLength);
+      return {
+        label: result.instancePath.slice(result.instancePath.lastIndexOf(".") + 1) + bitRange,
+        description: result.type + paramValue,
+        detail: elipsis + detail,
+        instancePath: result.instancePath,
+        isVar: result.isVar,
+        msb: result.msb || 0,
+        lsb: result.lsb || 0,
+        iconPath: icon,
+      };
+    });
+    this.quickPick.busy = false;
+
+    if (this.pendingQuery !== undefined) {
+      const next = this.pendingQuery;
+      this.pendingQuery = undefined;
+      if (next !== query) {
+        this.applyFilter(next);
+      }
+    }
+  }
+
+  private async onAccept() {
+    if (!this.document) {return;}
+    const selected = this.quickPick.selectedItems[0];
+    if (!selected) {return;}
+
+    if (selected.isVar) {
+      const metadata = await this.document.findTreeItem(selected.instancePath, selected.msb, selected.lsb);
+      if (metadata) {this.document.renderSignals([metadata.netlistId], [], undefined);}
+      this.quickPick.hide();
+    } else {
+      this.quickPick.value = selected.instancePath + ".";
+    }
+  }
+}

@@ -1,0 +1,232 @@
+$date
+	fixture
+$end
+
+$version
+	Verilog simulator
+$end
+
+$timescale
+	1ns
+$end
+
+$comment Csum: 1 e87f6a6300bba362 $end
+
+
+$scope module tb_x $end
+$var reg 1 ! clk $end
+$var reg 1 " rst_n $end
+$var reg 1 # in $end
+$var reg 1 $ in2 $end
+$var reg 1 % sh $end
+$var reg 1 & wl $end
+$var reg 1 ' clr $end
+$var reg 2 ( hi [1:0] $end
+$var reg 8 ) so [8:1] $end
+$var reg 8 * sp [7:0] $end
+$var reg 4 + cnt [3:0] $end
+$var reg 8 , sm [7:0] $end
+
+$scope module dut $end
+$var reg 1 - clk $end
+$var reg 1 . rst_n $end
+$var reg 1 / in $end
+$var reg 1 0 in2 $end
+$var reg 1 1 sh $end
+$var reg 1 2 wl $end
+$var reg 2 3 hi [1:0] $end
+$var reg 1 4 clr $end
+$var reg 8 5 so [8:1] $end
+$var reg 8 6 sp [7:0] $end
+$var reg 4 7 cnt [3:0] $end
+$var reg 8 8 sm [7:0] $end
+$upscope $end
+
+$upscope $end
+
+$enddefinitions $end
+
+#0
+$dumpvars
+0!
+0'
+04
+0/
+00
+0.
+01
+02
+0#
+0$
+0"
+0%
+0&
+bxxxx +
+bxxxx 7
+b00 3
+bxxxxxxxx 8
+bxxxxxxxx 5
+bxxxxxxxx 6
+b00 (
+bxxxxxxxx ,
+bxxxxxxxx )
+bxxxxxxxx *
+0-
+$end
+#5
+1!
+1-
+b00000000 5
+b00000000 )
+b00000000 6
+b00000000 *
+b0000 7
+b0000 +
+b00000000 8
+b00000000 ,
+#10
+0!
+0-
+#15
+1!
+1-
+#20
+0!
+0-
+#22
+1"
+1.
+1#
+1/
+1%
+11
+1$
+10
+#25
+1!
+1-
+b00000001 5
+b00000001 )
+b00000001 6
+b00000001 *
+b0001 7
+b0001 +
+b00000001 8
+b00000001 ,
+#30
+0!
+0-
+#32
+0#
+0/
+0$
+00
+#35
+1!
+1-
+b00000010 5
+b00000010 )
+b00000010 6
+b00000010 *
+b0010 7
+b0010 +
+b00000010 8
+b00000010 ,
+#40
+0!
+0-
+#42
+1$
+10
+#45
+1!
+1-
+b00000100 5
+b00000100 )
+b00000100 6
+b00000100 *
+b0011 7
+b0011 +
+b00000101 8
+b00000101 ,
+#50
+0!
+0-
+#52
+0%
+01
+1&
+12
+b10 (
+b10 3
+0$
+00
+#55
+1!
+1-
+b00001000 5
+b00001000 )
+b10000100 6
+b10000100 *
+b0100 7
+b0100 +
+b00001010 8
+b00001010 ,
+#60
+0!
+0-
+#62
+0&
+02
+1%
+11
+#65
+1!
+1-
+b00010000 5
+b00010000 )
+b00001000 6
+b00001000 *
+b0101 7
+b0101 +
+b00010100 8
+b00010100 ,
+#70
+0!
+0-
+#72
+0%
+01
+#75
+1!
+1-
+b00100000 5
+b00100000 )
+b0110 7
+b0110 +
+b00101000 8
+b00101000 ,
+#80
+0!
+0-
+#85
+1!
+1-
+b01000000 5
+b01000000 )
+b0111 7
+b0111 +
+b01010000 8
+b01010000 ,
+#90
+0!
+0-
+#95
+1!
+1-
+b10000000 5
+b10000000 )
+b1000 7
+b1000 +
+b10100000 8
+b10100000 ,

@@ -1,0 +1,2698 @@
+{
+  "name": "vaporview-fsdb",
+  "publisher": "unpublished-tbd",
+  "displayName": "VaporView FSDB",
+  "description": "FSDB-native waveform viewer and RTL debugger for VS Code. A fork of VaporView (GPL-3.0), not affiliated with upstream.",
+  "icon": "media/icon.png",
+  "galleryBanner": {
+    "color": "#202020",
+    "theme": "dark"
+  },
+  "version": "0.1.0",
+  "license": "GPL-3.0-only",
+  "repository": "https://github.com/archi-max/vaporview-fsdb",
+  "bugs": "https://github.com/archi-max/vaporview-fsdb/issues",
+  "homepage": "https://github.com/archi-max/vaporview-fsdb#readme",
+  "categories": [
+    "Debuggers",
+    "Visualization",
+    "Other"
+  ],
+  "keywords": [
+    "Waveform",
+    "Wave",
+    "Viewer",
+    "VCD",
+    "FST",
+    "GHW",
+    "FSDB",
+    "WCZ",
+    "debugger",
+    "driver trace",
+    "Logic Simulation",
+    "FPGA",
+    "Verilog",
+    "VHDL"
+  ],
+  "engines": {
+    "vscode": "^1.102.0"
+  },
+  "main": "./dist/extension",
+  "browser": "./dist/extension",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "contributes": {
+    "breakpoints": [
+      {
+        "language": "systemverilog"
+      },
+      {
+        "language": "verilog"
+      }
+    ],
+    "debuggers": [
+      {
+        "type": "vaporview-waveform",
+        "label": "VaporView FSDB Waveform",
+        "languages": [
+          "systemverilog",
+          "verilog"
+        ],
+        "configurationAttributes": {
+          "attach": {
+            "properties": {
+              "waveform": {
+                "type": "string",
+                "description": "The waveform (file path or URI) to debug; default: the active VaporView FSDB viewer."
+              },
+              "clock": {
+                "type": "string",
+                "description": "The clock's dump path, e.g. top.clk; default: chosen automatically (clk, clock, clk_i, ...)."
+              },
+              "instance": {
+                "type": "string",
+                "description": "The instance whose signals Locals shows at start, e.g. top.u0."
+              },
+              "lineBreakpointInstances": {
+                "type": "string",
+                "enum": [
+                  "this",
+                  "any"
+                ],
+                "default": "this",
+                "description": "Line breakpoints watch the line in this instance of its module, or in any instance."
+              },
+              "rate": {
+                "type": "number",
+                "default": 10,
+                "description": "Cycles per second for play."
+              }
+            }
+          }
+        },
+        "initialConfigurations": [
+          {
+            "type": "vaporview-waveform",
+            "request": "attach",
+            "name": "Debug Waveform"
+          }
+        ],
+        "configurationSnippets": [
+          {
+            "label": "VaporView FSDB: Debug Waveform",
+            "body": {
+              "type": "vaporview-waveform",
+              "request": "attach",
+              "name": "Debug Waveform",
+              "waveform": "^\"\\${file}\""
+            }
+          }
+        ]
+      }
+    ],
+    "resourceLabelFormatters": [
+      {
+        "scheme": "vaporview-remote",
+        "formatting": {
+          "label": "${path}",
+          "separator": "/",
+          "tildify": false,
+          "workspaceSuffix": "VaporView FSDB Remote"
+        }
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "vaporViewActivityBar",
+          "title": "VaporView FSDB",
+          "icon": "media/activityBar.svg"
+        }
+      ]
+    },
+    "views": {
+      "vaporViewActivityBar": [
+        {
+          "id": "waveformViewerNetlistView",
+          "name": "Netlist"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "waveformViewerNetlistView",
+        "contents": "Open an FSDB, WCZ, VCD, FST or GHW file to view the netlist."
+      }
+    ],
+    "languages": [
+      {
+        "id": "wavedump",
+        "extensions": [
+          ".vcd",
+          ".fst",
+          ".ghw"
+        ],
+        "aliases": [
+          "Waveform Dump"
+        ],
+        "filenames": [],
+        "icon": {
+          "light": "./media/wavedump_file_icon.svg",
+          "dark": "./media/wavedump_file_icon-dark.svg"
+        }
+      },
+      {
+        "id": "fsdb",
+        "extensions": [
+          ".fsdb",
+          ".wcz"
+        ],
+        "aliases": [
+          "Waveform Dump"
+        ],
+        "filenames": [],
+        "icon": {
+          "light": "./media/wavedump_file_icon_fsdb.svg",
+          "dark": "./media/wavedump_file_icon_fsdb-dark.svg"
+        }
+      },
+      {
+        "id": "systemverilog",
+        "extensions": [
+          ".sv",
+          ".svh"
+        ],
+        "aliases": [
+          "SystemVerilog"
+        ]
+      },
+      {
+        "id": "verilog",
+        "extensions": [
+          ".v",
+          ".vh"
+        ],
+        "aliases": [
+          "Verilog"
+        ]
+      }
+    ],
+    "customEditors": [
+      {
+        "viewType": "vaporview.waveformViewer",
+        "displayName": "VaporView FSDB",
+        "selector": [
+          {
+            "filenamePattern": "*.vcd"
+          },
+          {
+            "filenamePattern": "*.fst"
+          },
+          {
+            "filenamePattern": "*.ghw"
+          },
+          {
+            "filenamePattern": "*.fsdb"
+          },
+          {
+            "filenamePattern": "*.wcz"
+          }
+        ]
+      }
+    ],
+    "colors": [
+      {"id": "vaporview.driverBar", "description": "Driver highlight: the bar of the line driving the selected signal now.", "defaults": {"dark": "#6fcf9b", "light": "#1f7a4d", "highContrast": "#89f0b8", "highContrastLight": "#0b5c33"}},
+      {"id": "vaporview.driverBarDim", "description": "Driver highlight: the bar of every other line that assigns the selected signal.", "defaults": {"dark": "#6fcf9b8c", "light": "#1f7a4d8c", "highContrast": "#89f0b8", "highContrastLight": "#0b5c33"}},
+      {"id": "vaporview.driverLineBackground", "description": "Driver highlight: the faint background of the line driving the selected signal now.", "defaults": {"dark": "#6fcf9b1a", "light": "#1f7a4d14", "highContrast": "#89f0b833", "highContrastLight": "#0b5c331f"}},
+      {"id": "vaporview.driverNote", "description": "Driver highlight: the note after the driving line (drives <signal> at <time>).", "defaults": {"dark": "#6fcf9bcc", "light": "#1f7a4dcc", "highContrast": "#89f0b8", "highContrastLight": "#0b5c33"}}
+    ],
+    "configuration": [
+      {
+        "title": "General",
+        "properties": {
+          "vaporview.enableInstancePathTerminalLinks": {
+            "type": "boolean",
+            "default": true,
+            "scope": "application",
+            "description": "Enable terminal links for instance paths - This may conflict with other extensions that use terminal links for instance paths"
+          },
+          "vaporview.scrollingMode": {
+            "type": "string",
+            "enum": [
+              "Mouse",
+              "Touchpad",
+              "Auto"
+            ],
+            "default": "Mouse",
+            "scope": "application",
+            "description": "Scrolling mode for the waveform viewer. Options: 'mouse' (default), 'touch'."
+          },
+          "vaporview.touchpadPinchSensitivity": {
+            "type": "number",
+            "default": 1,
+            "scope": "application",
+            "minimum": 0.1,
+            "maximum": 10,
+            "description": "Touchpad pinch zoom sensitivity - Higher values Zoom faster."
+          },
+          "vaporview.sortNetlist": {
+            "type": "boolean",
+            "default": "false",
+            "scope": "application",
+            "description": "Alphabetically sort scopes, parameters, and variables in the netlist view"
+          },
+          "vaporview.removeGlitchTransitions": {
+            "type": "boolean",
+            "default": false,
+            "scope": "application",
+            "description": "Remove glitch transitions (multiple value changes in a single time step) in the waveform viewer. Files must be reloaded for this setting to take effect."
+          },
+          "vaporview.defaultTimeUnit": {
+            "type": "string",
+            "enum": [
+              "fs",
+              "ps",
+              "ns",
+              "µs",
+              "ms",
+              "s",
+              "none"
+            ],
+            "default": "none",
+            "scope": "window",
+            "description": "When opeining a new wavefom dump file, users can specify a default time unit to convert to."
+          }
+        }
+      },
+      {
+        "title": "File Loading",
+        "properties": {
+          "vaporview.defaultAutoReload": {
+            "type": "boolean",
+            "default": false,
+            "scope": "window",
+            "description": "Recommended: false (unchecked) - default state for the 'Auto Reload' checkbox in the control bar. When enabled, files opened will have auto reload enabled by default."
+          },
+          "vaporview.fstMaxStaticLoadSize": {
+            "type": "number",
+            "default": 256,
+            "minimum": 0,
+            "maximum": 65536,
+            "scope": "application",
+            "description": "Maximum file size (in MB) to load FST files into memory. This is faster, but consumes more memory. Set to 0 to disable."
+          },
+          "vaporview.promptLoadSettings": {
+            "type": "string",
+            "default": "Ask",
+            "enum": [
+              "Always",
+              "Ask",
+              "Never"
+            ],
+            "scope": "window",
+            "description": "When opening a waveform dump file, if a .json file with the same name is found in the same directory, should the viewer load the session from that file?"
+          },
+          "vaporview.fsdbAddonPath": {
+            "tags": ["advanced"],
+            "order": 906,
+            "type": "string",
+            "scope": "application",
+            "description": "Upstream VaporView's own FSDB reader addon, built by you against the reader libraries from your own installation. Leave empty to read FSDB files with wisp-helper (vaporview.wispHelperPath), which needs no vendor library. Instructions: https://github.com/Lramseyer/vaporview/blob/main/GETTING_STARTED.md"
+          },
+          "vaporview.fsdbReaderLibsPath": {
+            "tags": ["advanced"],
+            "order": 907,
+            "type": "string",
+            "scope": "application",
+            "description": "Path to find FSDB reader shared libraries (e.g. libnffr.so, libnsys.so for Linux) for your platform. Only for the optional upstream reader path; VaporView FSDB reads FSDB without it. Example: <your installation>/share/FsdbReader/linux64"
+          },
+          "vaporview.wispHelperPath": {
+            "type": "string",
+            "default": "",
+            "scope": "machine",
+            "$comment": "machine: a workspace must not choose an executable to run",
+            "description": "Path to wisp-helper, the FSDB / WCZ reader. Empty: the one packaged with the extension, else wisp-helper on PATH."
+          },
+          "vaporview.wisp.windowing": {
+            "type": "boolean",
+            "default": true,
+            "scope": "machine",
+            "$comment": "machine: viewer load strategy for this machine (memory), not a property of the dump",
+            "description": "Load FSDB / WCZ signals in windows (per-pixel summaries, prefetch); small signals still load whole. Off: every signal loads whole."
+          },
+          "vaporview.wisp.workers": {
+            "type": "number",
+            "default": 0,
+            "minimum": 0,
+            "maximum": 8,
+            "scope": "machine",
+            "$comment": "machine: CPU use of this machine, not a property of the dump",
+            "description": "wisp-helper reader threads (--workers, 1-8). 0: the helper's default (4, or WISP_WORKERS)."
+          },
+          "vaporview.wisp.cacheMb": {
+            "type": "number",
+            "default": 0,
+            "minimum": 0,
+            "scope": "machine",
+            "$comment": "machine: memory of this machine, not a property of the dump",
+            "description": "wisp-helper decoded-block cache in MiB (--cache-mb). 0: the helper's default."
+          },
+          "vaporview.wisp.remoteMode": {
+            "type": "string",
+            "enum": ["auto", "on", "off"],
+            "default": "auto",
+            "scope": "machine",
+            "$comment": "machine: depends on the link to this machine, not on the dump",
+            "description": "Windowed loading tuned for a remote link (fewer round trips, small background whole-loads). auto: on when VS Code runs the extension remotely (Remote-SSH, containers, WSL)."
+          },
+          "vaporview.wisp.simulatedLink": {
+            "tags": ["advanced"],
+            "order": 900,
+            "type": "string",
+            "default": "",
+            "scope": "resource",
+            "description": "Internal: used by tests. \"<rtt ms>,<MB/s>\" delays the waveform relay like a remote link. Empty: off."
+          },
+          "vaporview.wisp.portLinks": {
+            "type": "boolean",
+            "default": true,
+            "scope": "resource",
+            "description": "FSDB: link port copies to their drivers. Off: port copies are listed without values."
+          },
+          "vaporview.wisp.outsideWrites": {
+            "type": "string",
+            "enum": ["unknown", "none"],
+            "enumDescriptions": [
+              "Not stated: port copies the converter cannot link stay listed without values.",
+              "The run wrote no design signal from outside the logic (no force, deposit or C-code write): the helper computes those port copies from the dump's own description of the logic."
+            ],
+            "default": "unknown",
+            "scope": "resource",
+            "description": "FSDB: whether the simulation wrote any design signal from outside the logic. \"none\" lets port copies without stored values be computed (reopen the file to apply)."
+          },
+          "vaporview.wisp.forceLog": {
+            "type": "string",
+            "default": "",
+            "scope": "machine",
+            "$comment": "machine: writes a log file on this machine",
+            "description": "FSDB: the simulator's force log (WISP_FORCE_LOG), so forced port copies are detected."
+          },
+          "vaporview.wisp.verifyStart": {
+            "tags": ["advanced"],
+            "order": 905,
+            "type": "string",
+            "default": "idle:30",
+            "pattern": "^(open|request|off|idle:[0-9]{1,5})$",
+            "scope": "machine",
+            "$comment": "machine: when this machine spends CPU on the check, not a property of the dump",
+            "markdownDescription": "When wisp-helper's background whole-file check of a lazily opened FSDB file starts (`WISP_VERIFY_START`). `idle:<seconds>` (default `idle:30`): once no request has been made for that long, so the check does not slow the first reads. `open`: at the open. `request` or `off`: never on its own. Values shown before the check passes are marked unverified either way."
+          },
+          "vaporview.wisp.planBudgetMB": {
+            "tags": ["advanced"],
+            "order": 903,
+            "type": "string",
+            "default": "auto",
+            "pattern": "^(auto|off|[0-9]+)$",
+            "scope": "machine",
+            "$comment": "machine: memory of this machine, not a property of the dump",
+            "markdownDescription": "Memory budget in MiB for wisp-helper's FSDB read plan (`RUN_PLAN_BUDGET_MB`). A file whose plan needs more is refused at open with a message naming this setting. `auto`: 40% of the RAM of the machine running the helper, at least 4096 and at most 32768; the memory for computed signals (`outsideWrites` none) is then at most 8 GB, so on very large dumps they show \"no value\" quickly instead of a long first read (set a number to allow more). A number: that budget (64 to 32768). `off`: the helper's default (max(1 GiB, file size / 2)). Takes effect for files opened after the change."
+          },
+          "vaporview.wisp.checkThreads": {
+            "tags": ["advanced"],
+            "order": 904,
+            "type": "number",
+            "default": 2,
+            "minimum": 0,
+            "maximum": 16,
+            "scope": "machine",
+            "$comment": "machine: CPU use of this machine, not a property of the dump",
+            "description": "Threads for wisp-helper's whole-file check of an FSDB file, which runs in the background after a lazy open (WISP_VERIFY_THREADS). 0: the helper's default (every CPU it may use, at most 16). Values shown before the check passes are marked unverified either way."
+          },
+          "vaporview.wisp.directOpen": {
+            "tags": ["advanced"],
+            "order": 902,
+            "type": "string",
+            "enum": [
+              "lazy",
+              "full"
+            ],
+            "default": "lazy",
+            "enumDescriptions": [
+              "Values come at once; the whole-file check runs in the background. If it fails, what is shown stays and an error says the file is corrupted.",
+              "The whole-file check runs before the first value (slower open, nothing shown from a file that is refused)."
+            ],
+            "scope": "machine",
+            "$comment": "machine: memory/CPU trade-off of this machine at open",
+            "description": "FSDB open mode (WISP_DIRECT_OPEN)."
+          },
+          "vaporview.wisp.env": {
+            "tags": ["advanced"],
+            "order": 901,
+            "type": "object",
+            "default": {},
+            "scope": "machine",
+            "$comment": "machine: a workspace must not set the helper process environment",
+            "description": "Extra environment variables for wisp-helper (for example WISP_INDEX_DIR, WISP_VERIFY_THREADS)."
+          }
+        }
+      },
+      {
+        "title": "Waveform Control Protocol",
+        "properties": {
+          "vaporview.wcp.enabled": {
+            "type": "boolean",
+            "default": false,
+            "scope": "machine",
+            "$comment": "machine: opens a network port on this machine",
+            "description": "Start a Waveform Control Protocol (WCP) server when VaporView FSDB activates. Clients select the waveform with the WCP load command."
+          },
+          "vaporview.wcp.port": {
+            "type": "number",
+            "default": 54322,
+            "minimum": 0,
+            "maximum": 65535,
+            "scope": "machine",
+            "$comment": "machine: a network port on this machine",
+            "description": "TCP port for the startup WCP server. Set to 0 to let the operating system choose an available port."
+          }
+        }
+      },
+      {
+        "title": "Styles and Naming",
+        "properties": {
+          "vaporview.showRulerLines": {
+            "order": 1,
+            "type": "boolean",
+            "default": "true",
+            "scope": "application",
+            "description": "Vertical ruler lines in the waveform viewer."
+          },
+          "vaporview.fillMultiBitValues": {
+            "order": 2,
+            "type": "boolean",
+            "default": "false",
+            "scope": "application",
+            "description": "Multi-bit renderer style - If checked, fills the value box with color. If unchecked, only the outline is drawn."
+          },
+          "vaporview.multiBitFixedHeight": {
+            "order": 3,
+            "type": "boolean",
+            "default": "true",
+            "scope": "application",
+            "description": "Bit vector renderer style - If checked, multi-bit signals are drawn with a fixed height. If unchecked, short transitions are drawn with a smaller height."
+          },
+          "vaporview.defaultNameType": {
+            "order": 4,
+            "type": "string",
+            "enum": [
+              "fullPath",
+              "signalName"
+            ],
+            "default": "fullPath",
+            "scope": "application",
+            "description": ""
+          },
+          "vaporview.defaultSingleBitColor": {
+            "order": 5,
+            "type": "number",
+            "default": 1,
+            "minimum": 1,
+            "maximum": 8,
+            "scope": "application",
+            "description": "Default waveform color for single bit signals."
+          },
+          "vaporview.defaultMultiBitColor": {
+            "order": 6,
+            "type": "number",
+            "default": 1,
+            "minimum": 1,
+            "maximum": 8,
+            "scope": "application",
+            "description": "Default waveform color for multi bit signals."
+          },
+          "vaporview.defaultParamColor": {
+            "order": 7,
+            "type": "number",
+            "default": 3,
+            "minimum": 1,
+            "maximum": 8,
+            "scope": "application",
+            "description": "Default waveform color for parameters."
+          },
+          "vaporview.defaultStringColor": {
+            "order": 8,
+            "type": "number",
+            "default": 2,
+            "minimum": 1,
+            "maximum": 8,
+            "scope": "application",
+            "description": "Default waveform color for strings."
+          },
+          "vaporview.defaultEnumColor": {
+            "order": 9,
+            "type": "number",
+            "default": 1,
+            "minimum": 1,
+            "maximum": 8,
+            "scope": "application",
+            "description": "Default waveform color for enums."
+          },
+          "vaporview.defaultCustomSignalColor": {
+            "order": 10,
+            "type": "number",
+            "default": 1,
+            "minimum": 1,
+            "maximum": 8,
+            "scope": "application",
+            "description": "Default waveform color for custom signals."
+          },
+          "vaporview.customColor5": {
+            "order": 11,
+            "type": "string",
+            "scope": "application",
+            "default": "#ffa557",
+            "description": "Fallback color for Color 5, must be a valid color name."
+          },
+          "vaporview.customColor6": {
+            "order": 12,
+            "type": "string",
+            "scope": "application",
+            "default": "#dcdcaa",
+            "description": "Fallback color for Color 6, must be a valid color name."
+          },
+          "vaporview.customColor7": {
+            "order": 13,
+            "type": "string",
+            "scope": "application",
+            "default": "#d2a8ff",
+            "description": "Fallback color for Color 7, must be a valid color name."
+          },
+          "vaporview.customColor8": {
+            "order": 14,
+            "type": "string",
+            "scope": "application",
+            "default": "#4abfa8",
+            "description": "Fallback color for Color 8, must be a valid color name."
+          }
+        }
+      },
+      {
+        "title": "Performance",
+        "properties": {
+          "vaporview.enableAnimations": {
+            "order": 1,
+            "type": "boolean",
+            "default": true,
+            "scope": "application",
+            "description": "Enable animations for the waveform viewer."
+          },
+          "vaporview.animationDuration": {
+            "order": 2,
+            "type": "number",
+            "default": 50,
+            "minimum": 5,
+            "maximum": 500,
+            "scope": "application",
+            "description": "Animation duration in milliseconds."
+          },
+          "vaporview.useGlow": {
+            "order": 3,
+            "type": "boolean",
+            "default": false,
+            "scope": "application",
+            "description": "Enable glow effect for the waveform viewer. This is aesthetic only and will probably impact performance."
+          },
+          "vaporview.overrideDevicePixelRatio": {
+            "order": 4,
+            "type": "boolean",
+            "default": false,
+            "scope": "application",
+            "description": "Recommended: false (unchecked) - Override the device pixel ratio for the waveform viewer. This can be used to improve performance on high-DPI displays, or correct for incorrect device pixel ratio detection."
+          },
+          "vaporview.userPixelRatio": {
+            "order": 5,
+            "type": "number",
+            "default": 1,
+            "minimum": 0.1,
+            "maximum": 10,
+            "scope": "application",
+            "description": "Device pixel ratio for the waveform viewer. This is only used if 'Override Device Pixel Ratio' is enabled."
+          },
+          "vaporview.disableAnalogRendererOptimizations": {
+            "order": 6,
+            "type": "boolean",
+            "default": false,
+            "scope": "application",
+            "description": "Recommended: false (unchecked) - Disable optimizations for the analog renderer. This may reduce rendering performance."
+          }
+        }
+      },
+      {
+        "title": "Driver Tracing",
+        "properties": {
+          "vaporview.trace.designArgs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "scope": "resource",
+            "markdownDescription": "Driver tracing (Trace Driver, Trace to Root): the slang arguments of the design the waveform was simulated from, e.g. `[\"-f\", \"files.f\", \"--top\", \"tb\"]`, relative to `#vaporview.trace.designRoot#`. Empty: the `build` of the folder's `.slang/local/server.json` or `.slang/server.json`."
+          },
+          "vaporview.trace.designRoot": {
+            "type": "string",
+            "default": "",
+            "scope": "resource",
+            "description": "Driver tracing: the folder the design arguments are relative to (empty: the workspace folder holding the waveform)."
+          },
+          "vaporview.trace.xprop": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "on",
+              "off"
+            ],
+            "default": "auto",
+            "scope": "resource",
+            "description": "Driver tracing: X-propagation (VCS -xprop) when re-executing a statement. auto: re-run a step merged when the dump agrees with that and not with the x-optimistic run."
+          },
+          "vaporview.trace.driverHighlight": {
+            "type": "boolean",
+            "default": true,
+            "scope": "resource",
+            "description": "Driver highlight: while a signal is selected (its waveform row, or the cursor on its name in the editor), mark every source line that assigns it, and the statement driving it at the marker more strongly (\"drives <signal> at <time>\"). Needs the design model; with no design chosen it shows nothing."
+          },
+          "vaporview.trace.prepare": {
+            "type": "string",
+            "enum": [
+              "onOpen",
+              "onFirstTrace"
+            ],
+            "enumDescriptions": [
+              "When a waveform opens and its design is already chosen, load the design for Trace in the background (the status bar says \"Preparing Trace\"), so the first Trace does not wait for it.",
+              "Load the design only when you first trace: opening a waveform costs nothing extra."
+            ],
+            "default": "onOpen",
+            "scope": "resource",
+            "description": "Driver tracing: when the design model is loaded."
+          },
+          "vaporview.trace.xChainSteps": {
+            "type": "number",
+            "default": 30,
+            "description": "Trace to Root: steps at most before the chain stops (its label says budget)."
+          },
+          "vaporview.trace.verdiHome": {
+            "type": "string",
+            "default": "",
+            "description": "Path to your Verdi installation, for the optional cross-check (its bin/ is put first on PATH). Empty: verdi on PATH, else VERDI_HOME."
+          }
+        }
+      },
+      {
+        "title": "Source Link",
+        "properties": {
+          "vaporview.sourceLink.slangConnection": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "extension",
+              "own"
+            ],
+            "default": "auto",
+            "enumDescriptions": [
+              "The slang extension's language server when it is installed, else our own slang-server",
+              "Only the slang extension (hudson-river-trading.vscode-slang)",
+              "Always our own slang-server process (vaporview.sourceLink.slangServerPath)"
+            ],
+            "description": "How the SystemVerilog editor <-> waveform link reaches slang-server."
+          },
+          "vaporview.sourceLink.slangServerPath": {
+            "type": "string",
+            "default": "",
+            "description": "slang-server executable for the link's own connection (used when the slang extension is not installed). Empty: slang-server on PATH."
+          },
+          "vaporview.sourceLink.pathMapping": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "description": "Waveform path mapping rules, each \"design prefix = waveform prefix\" (e.g. \"cpu = top_tb.dut\"). Rules inferred from the hierarchies are added separately and never replace these."
+          },
+          "vaporview.sourceLink.autoPickProfile": {
+            "type": "boolean",
+            "default": true,
+            "description": "When a waveform opens and slang-server has no design yet, build it from the slang profile (.f build file in .slang/, ~/.config/cmux-slang/<project> or the workspace) whose --top matches the waveform's top scope. A notice offers Undo."
+          },
+          "vaporview.sourceLink.elaborate": {
+            "type": "string",
+            "enum": [
+              "ask",
+              "always",
+              "never"
+            ],
+            "default": "ask",
+            "description": "When slang-server has no top level, offer to elaborate the design with the module the waveform's top scope is named after."
+          },
+          "vaporview.sourceLink.inlineValues": {
+            "type": [
+              "string",
+              "boolean"
+            ],
+            "enum": [
+              "cursorLine",
+              "all",
+              "off",
+              true,
+              false
+            ],
+            "enumDescriptions": [
+              "Only on the cursor's line and the selected lines.",
+              "On every line that has a signal.",
+              "Not shown.",
+              "(older setting) Same as \"all\".",
+              "(older setting) Same as \"off\"."
+            ],
+            "default": "cursorLine",
+            "description": "Show waveform values at the marker after the lines of SystemVerilog editors (outside a waveform debug session, which shows its own)."
+          },
+          "vaporview.sourceLink.enumNames": {
+            "type": "boolean",
+            "default": true,
+            "description": "Rows of enum-typed signals show member names (types from slang-server) by default."
+          },
+          "vaporview.debug.inlineValues": {
+            "type": "string",
+            "enum": [
+              "stoppedLine",
+              "all",
+              "off"
+            ],
+            "enumDescriptions": [
+              "Values only on the line the debugger is stopped at.",
+              "Values after every visible line of the module's instance.",
+              "No values in the editor (Locals and the waveform still show them)."
+            ],
+            "default": "stoppedLine",
+            "description": "Debug mode: where SystemVerilog editors show signal values at the marker, as quiet text after the line."
+          }
+        }
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "vaporview.showInNetlistView",
+        "key": "ctrl+r",
+        "mac": "cmd+r",
+        "when": "activeCustomEditorId == 'vaporview.waveformViewer' && vaporview.waveformViewerFocused"
+      },
+      {
+        "command": "vaporview.searchNetlist",
+        "key": "ctrl+f",
+        "mac": "cmd+f",
+        "when": "activeCustomEditorId == 'vaporview.waveformViewer' && vaporview.netlistSearchable && vaporview.waveformViewerFocused"
+      },
+      {
+        "command": "vaporview.renameSignalGroup",
+        "key": "F2",
+        "mac": "F2",
+        "when": "activeCustomEditorId == 'vaporview.waveformViewer'"
+      },
+      {
+        "command": "vaporview.zoomToFit",
+        "key": "ctrl+0",
+        "mac": "cmd+0",
+        "when": "activeCustomEditorId == 'vaporview.waveformViewer'"
+      },
+      {
+        "command": "vaporview.increaseVerticalScale",
+        "key": "alt+numpad_add",
+        "mac": "alt+numpad_add",
+        "when": "activeCustomEditorId == 'vaporview.waveformViewer'"
+      },
+      {
+        "command": "vaporview.decreaseVerticalScale",
+        "key": "alt+numpad_subtract",
+        "mac": "alt+numpad_subtract",
+        "when": "activeCustomEditorId == 'vaporview.waveformViewer'"
+      },
+      {
+        "command": "vaporview.increaseVerticalScale",
+        "key": "alt+=",
+        "mac": "alt+=",
+        "when": "activeCustomEditorId == 'vaporview.waveformViewer'"
+      },
+      {
+        "command": "vaporview.decreaseVerticalScale",
+        "key": "alt+-",
+        "mac": "alt+-",
+        "when": "activeCustomEditorId == 'vaporview.waveformViewer'"
+      },
+      {
+        "command": "vaporview.newGroupFromSelection",
+        "key": "g",
+        "when": "activeCustomEditorId == 'vaporview.waveformViewer' && !inputFocus && !textInputFocus && vaporview.waveformViewerFocused"
+      },
+      {
+        "command": "vaporview.defaultColor1",
+        "key": "1",
+        "when": "activeCustomEditorId == 'vaporview.waveformViewer' && !inputFocus && !textInputFocus && vaporview.waveformViewerFocused"
+      },
+      {
+        "command": "vaporview.defaultColor2",
+        "key": "2",
+        "when": "activeCustomEditorId == 'vaporview.waveformViewer' && !inputFocus && !textInputFocus && vaporview.waveformViewerFocused"
+      },
+      {
+        "command": "vaporview.defaultColor3",
+        "key": "3",
+        "when": "activeCustomEditorId == 'vaporview.waveformViewer' && !inputFocus && !textInputFocus && vaporview.waveformViewerFocused"
+      },
+      {
+        "command": "vaporview.defaultColor4",
+        "key": "4",
+        "when": "activeCustomEditorId == 'vaporview.waveformViewer' && !inputFocus && !textInputFocus && vaporview.waveformViewerFocused"
+      },
+      {
+        "command": "vaporview.defaultColor5",
+        "key": "5",
+        "when": "activeCustomEditorId == 'vaporview.waveformViewer' && !inputFocus && !textInputFocus && vaporview.waveformViewerFocused"
+      },
+      {
+        "command": "vaporview.defaultColor6",
+        "key": "6",
+        "when": "activeCustomEditorId == 'vaporview.waveformViewer' && !inputFocus && !textInputFocus && vaporview.waveformViewerFocused"
+      },
+      {
+        "command": "vaporview.defaultColor7",
+        "key": "7",
+        "when": "activeCustomEditorId == 'vaporview.waveformViewer' && !inputFocus && !textInputFocus && vaporview.waveformViewerFocused"
+      },
+      {
+        "command": "vaporview.defaultColor8",
+        "key": "8",
+        "when": "activeCustomEditorId == 'vaporview.waveformViewer' && !inputFocus && !textInputFocus && vaporview.waveformViewerFocused"
+      },
+      {
+        "command": "vaporview.traceDriver",
+        "key": "ctrl+t",
+        "when": "activeCustomEditorId == 'vaporview.waveformViewer' && vaporview.waveformViewerFocused"
+      },
+      {
+        "command": "vaporview.traceXRoot",
+        "key": "ctrl+alt+t",
+        "when": "activeCustomEditorId == 'vaporview.waveformViewer' && vaporview.waveformViewerFocused"
+      },
+      {
+        "command": "vaporview.traceDriverFromEditor",
+        "key": "ctrl+alt+t",
+        "when": "editorTextFocus && (editorLangId == systemverilog || editorLangId == verilog)"
+      },
+      {
+        "command": "vaporview.traceXRootFromEditor",
+        "key": "ctrl+alt+shift+t",
+        "when": "editorTextFocus && (editorLangId == systemverilog || editorLangId == verilog)"
+      },
+      {
+        "command": "vaporview.sourceLink.addSignal",
+        "key": "ctrl+alt+w",
+        "mac": "ctrl+alt+w",
+        "when": "editorTextFocus && (resourceExtname =~ /^\\.(sv|svh|v|vh|svi|svp)$/ || editorLangId == systemverilog || editorLangId == verilog)"
+      },
+      {
+        "command": "vaporview.sourceLink.showInSource",
+        "key": "alt+shift+d",
+        "mac": "alt+shift+d",
+        "when": "activeCustomEditorId == 'vaporview.waveformViewer' && vaporview.waveformViewerFocused"
+      },
+      {
+        "command": "vaporview.sourceLink.navigateBack",
+        "key": "ctrl+alt+-",
+        "mac": "ctrl+-",
+        "when": "vaporview.sourceLink.hasHistory && (activeCustomEditorId == 'vaporview.waveformViewer' || resourceExtname =~ /^\\.(sv|svh|v|vh|svi|svp)$/ || editorLangId == systemverilog || editorLangId == verilog)"
+      },
+      {
+        "command": "vaporview.sourceLink.navigateForward",
+        "key": "ctrl+shift+-",
+        "mac": "ctrl+shift+-",
+        "when": "vaporview.sourceLink.hasHistory && (activeCustomEditorId == 'vaporview.waveformViewer' || resourceExtname =~ /^\\.(sv|svh|v|vh|svi|svp)$/ || editorLangId == systemverilog || editorLangId == verilog)"
+      },
+      {
+        "key": "f5",
+        "command": "vaporview.debugger.start",
+        "when": "activeCustomEditorId == 'vaporview.waveformViewer' && !inDebugMode"
+      },
+      {
+        "key": "ctrl+f10",
+        "mac": "cmd+f10",
+        "command": "workbench.action.debug.stepBack",
+        "when": "debugType == 'vaporview-waveform'"
+      },
+      {
+        "key": "ctrl+f6",
+        "mac": "cmd+f6",
+        "command": "workbench.action.debug.reverseContinue",
+        "when": "debugType == 'vaporview-waveform'"
+      },
+      {
+        "key": "ctrl+shift+f6",
+        "mac": "cmd+shift+f6",
+        "command": "vaporview.debugger.first",
+        "when": "debugType == 'vaporview-waveform'"
+      },
+      {
+        "key": "ctrl+f11",
+        "mac": "cmd+f11",
+        "command": "vaporview.debugger.last",
+        "when": "debugType == 'vaporview-waveform'"
+      },
+      {
+        "key": "ctrl+f7",
+        "mac": "cmd+f7",
+        "command": "vaporview.debugger.togglePlay",
+        "when": "debugType == 'vaporview-waveform'"
+      },
+      {
+        "key": "ctrl+f8",
+        "mac": "cmd+f8",
+        "command": "vaporview.debugger.faster",
+        "when": "debugType == 'vaporview-waveform'"
+      },
+      {
+        "key": "ctrl+shift+f8",
+        "mac": "cmd+shift+f8",
+        "command": "vaporview.debugger.slower",
+        "when": "debugType == 'vaporview-waveform'"
+      },
+      {
+        "key": "alt+f7",
+        "command": "vaporview.debugger.toggleLineBreakpointAnyInstance",
+        "when": "editorTextFocus && resourceExtname =~ /\\.(sv|svh|v|vh)$/"
+      }
+    ],
+    "submenus": [
+      {
+        "id": "vaporview.riscvFormat",
+        "label": "RISC-V"
+      },
+      {
+        "id": "vaporview.waveDrom",
+        "label": "WaveDrom",
+        "when": "activeCustomEditorId == 'vaporview.waveformViewer'"
+      },
+      {
+        "id": "vaporview.valueFormat",
+        "label": "Format Values",
+        "when": "webviewSection == 'signal' && width != '1'"
+      },
+      {
+        "id": "vaporview.renderType",
+        "label": "Render Type",
+        "when": "webviewSection == 'signal'"
+      },
+      {
+        "id": "vaporview.highlightEdge",
+        "label": "Edge Guides",
+        "when": "webviewSection == 'signal'"
+      },
+      {
+        "id": "vaporview.valueColor",
+        "label": "Color",
+        "when": "webviewSection == 'signal'"
+      },
+      {
+        "id": "vaporview.rowHeight",
+        "label": "Row Height",
+        "when": "webviewSection == 'signal'"
+      },
+      {
+        "id": "vaporview.nameType",
+        "label": "Name",
+        "when": "webviewSection == 'signal'"
+      },
+      {
+        "id": "vaporview.split",
+        "label": "Split",
+        "when": "webviewSection == 'signal' && (activeCustomEditorId == 'vaporview.waveformViewer') && !inputFocus && width > 1 && cmuxDeclared"
+      },
+      {
+        "id": "vaporview.createSignals",
+        "label": "Create Signals From",
+        "when": "(webviewSection == 'waveform-labels' || webviewSection == 'signal') && (activeCustomEditorId == 'vaporview.waveformViewer') && !inputFocus && width > 1"
+      },
+      {
+        "id": "vaporview.timeUnit",
+        "label": "Time Unit",
+        "when": "activeCustomEditorId == 'vaporview.waveformViewer'"
+      },
+      {
+        "id": "vaporview.rulerTimeIncrement",
+        "label": "Ruler Time Increment",
+        "when": "activeCustomEditorId == 'vaporview.waveformViewer'"
+      },
+      {
+        "id": "vaporview.scrollMode",
+        "label": "Scrolling Mode",
+        "when": "activeCustomEditorId == 'vaporview.waveformViewer'"
+      }
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "vaporview.sourceLink.useAsBuildFile",
+          "when": "resourceExtname == .f && vaporview.activated",
+          "group": "7_modification@90"
+        },
+        {
+          "command": "vaporview.sourceLink.clearBuildFile",
+          "when": "resourceExtname == .f && vaporview.activated && vaporview.slangTarget == buildFile",
+          "group": "7_modification@91"
+        }
+      ],
+        "debug/toolBar": [
+          {
+            "command": "vaporview.debugger.togglePlay",
+            "when": "debugType == 'vaporview-waveform'",
+            "group": "navigation@9"
+          }
+        ],
+      "commandPalette": [
+        {"command": "vaporview.traceVerdiCheck", "when": "wisp.verdiAvailable"},
+        {"command": "waveformViewer.addVariable", "when": "false"},
+        {"command": "waveformViewer.removeVariable", "when": "false"},
+        {"command": "waveformViewer.revealInNetlistView", "when": "false"},
+        {"command": "waveformViewer.setMarker", "when": "false"},
+        {"command": "waveformViewer.getOpenDocuments", "when": "false"},
+        {"command": "waveformViewer.getViewerState", "when": "false"},
+        {"command": "waveformViewer.getValuesAtTime", "when": "false"},
+        {"command": "vaporview.addSelected", "when": "false"},
+        {"command": "vaporview.addVariable", "when": "false"},
+        {"command": "vaporview.addAllInScopeShallow", "when": "false"},
+        {"command": "vaporview.addAllInScopeRecursive", "when": "false"},
+        {"command": "vaporview.removeSelectedNetlist", "when": "false"},
+        {"command": "vaporview.removeAllInScope", "when": "false"},
+        {"command": "vaporview.removeSignal", "when": "false"},
+        {"command": "vaporview.showInNetlistView", "when": "false"},
+        {"command": "vaporview.showInViewer", "when": "false"},
+        {"command": "vaporview.copyName", "when": "false"},
+        {"command": "vaporview.copyValueAtMarker", "when": "false"},
+        {"command": "vaporview.newSignalGroup", "when": "false"},
+        {"command": "vaporview.newGroupFromSelection", "when": "false"},
+        {"command": "vaporview.renameSignalGroup", "when": "false"},
+        {"command": "vaporview.ungroupSignals", "when": "false"},
+        {"command": "vaporview.deleteGroup", "when": "false"},
+        {"command": "vaporview.newSeparator", "when": "false"},
+        {"command": "vaporview.removeSeparator", "when": "false"},
+        {"command": "vaporview.newSignalFromBitRange", "when": "false"},
+        {"command": "vaporview.createSignalsForAllBits", "when": "false"},
+        {"command": "vaporview.createSignalsForAllNibbles", "when": "false"},
+        {"command": "vaporview.createSignalsForAllBytes", "when": "false"},
+        {"command": "vaporview.createSignalsForAllWords", "when": "false"},
+        {"command": "vaporview.createSignalsForAllDoubleWords", "when": "false"},
+        {"command": "vaporview.createSignalsForAllQuadWords", "when": "false"},
+        {"command": "vaporview.createSignalsForAllCustomLength", "when": "false"},
+        {"command": "vaporview.displayAsBinary", "when": "false"},
+        {"command": "vaporview.displayAsDecimal", "when": "false"},
+        {"command": "vaporview.displayAsDecimalSigned", "when": "false"},
+        {"command": "vaporview.displayAsHexadecimal", "when": "false"},
+        {"command": "vaporview.displayAsOctal", "when": "false"},
+        {"command": "vaporview.displayAsFloat", "when": "false"},
+        {"command": "vaporview.displayAsBFloat", "when": "false"},
+        {"command": "vaporview.displayAsTFloat", "when": "false"},
+        {"command": "vaporview.displayAsAscii", "when": "false"},
+        {"command": "vaporview.displayAsEpochTimeNs", "when": "false"},
+        {"command": "vaporview.displayAsEnum", "when": "false"},
+        {"command": "vaporview.displayAsFixedPoint", "when": "false"},
+        {"command": "vaporview.displayAsFixedPointSigned", "when": "false"},
+        {"command": "vaporview.renderMultiBit", "when": "false"},
+        {"command": "vaporview.renderLinear", "when": "false"},
+        {"command": "vaporview.renderStepped", "when": "false"},
+        {"command": "vaporview.renderLinearSigned", "when": "false"},
+        {"command": "vaporview.renderSteppedSigned", "when": "false"},
+        {"command": "vaporview.annotatePosedge", "when": "false"},
+        {"command": "vaporview.annotateNegedge", "when": "false"},
+        {"command": "vaporview.annotateAllEdge", "when": "false"},
+        {"command": "vaporview.annotateNone", "when": "false"},
+        {"command": "vaporview.defaultColor1", "when": "false"},
+        {"command": "vaporview.defaultColor2", "when": "false"},
+        {"command": "vaporview.defaultColor3", "when": "false"},
+        {"command": "vaporview.defaultColor4", "when": "false"},
+        {"command": "vaporview.defaultColor5", "when": "false"},
+        {"command": "vaporview.defaultColor6", "when": "false"},
+        {"command": "vaporview.defaultColor7", "when": "false"},
+        {"command": "vaporview.defaultColor8", "when": "false"},
+        {"command": "vaporview.rowHeight1x", "when": "false"},
+        {"command": "vaporview.rowHeight2x", "when": "false"},
+        {"command": "vaporview.rowHeight4x", "when": "false"},
+        {"command": "vaporview.rowHeight8x", "when": "false"},
+        {"command": "vaporview.setNameTypeFullPath", "when": "false"},
+        {"command": "vaporview.setNameTypeSignalName", "when": "false"},
+        {"command": "vaporview.setNameTypeCustom", "when": "false"},
+        {"command": "vaporview.increaseVerticalScale", "when": "false"},
+        {"command": "vaporview.decreaseVerticalScale", "when": "false"},
+        {"command": "vaporview.resetVerticalScale", "when": "false"},
+        {"command": "vaporview.setTimeUnitsSeconds", "when": "false"},
+        {"command": "vaporview.setTimeUnitsMilliseconds", "when": "false"},
+        {"command": "vaporview.setTimeUnitsMicroseconds", "when": "false"},
+        {"command": "vaporview.setTimeUnitsNanoseconds", "when": "false"},
+        {"command": "vaporview.setTimeUnitsPicoseconds", "when": "false"},
+        {"command": "vaporview.setTimeUnitsFemtoseconds", "when": "false"},
+        {"command": "vaporview.showRulerLines", "when": "false"},
+        {"command": "vaporview.hideRulerLines", "when": "false"},
+        {"command": "vaporview.setRulerTimeIncrement", "when": "false"},
+        {"command": "vaporview.autoRulerTimeIncrement", "when": "false"},
+        {"command": "vaporview.fillBitVector", "when": "false"},
+        {"command": "vaporview.outlineBitVector", "when": "false"},
+        {"command": "vaporview.enableAnimations", "when": "false"},
+        {"command": "vaporview.disableAnimations", "when": "false"},
+        {"command": "vaporview.setMouseScrollingMode", "when": "false"},
+        {"command": "vaporview.setTouchpadScrollingMode", "when": "false"},
+        {"command": "vaporview.setAutoScrollingMode", "when": "false"},
+        {"command": "vaporview.copyWaveDrom", "when": "false"},
+        {"command": "vaporview.setWaveDromClockRising", "when": "false"},
+        {"command": "vaporview.setWaveDromClockFalling", "when": "false"},
+        {"command": "vaporview.unsetWaveDromClock", "when": "false"},
+        {
+          "command": "vaporview.splitDeclared",
+          "when": "false"
+        },
+        {"command": "vaporview.displayAsRiscv", "when": "false"},
+        {"command": "vaporview.displayAsRiscvNumeric", "when": "false"},
+        {"command": "vaporview.displayAsRiscvNoAlias", "when": "false"},
+        {"command": "vaporview.displayAsRiscvNumericNoAlias", "when": "false"},
+        {"command": "vaporview.displayAsAliasTable", "when": "false"},
+        {"command": "vaporview.removeValueAlias", "when": "false"},
+        {"command": "vaporview.loadValueAliases", "when": "activeCustomEditorId == 'vaporview.waveformViewer'"},
+        {
+          "command": "vaporview.sourceLink.showEnumNames",
+          "when": "false"
+        },
+        {
+          "command": "vaporview.debugger.breakWhenChanges",
+          "when": "activeCustomEditorId == 'vaporview.waveformViewer' || debugType == 'vaporview-waveform'"
+        },
+        {
+          "command": "vaporview.debugger.breakWhenEquals",
+          "when": "activeCustomEditorId == 'vaporview.waveformViewer' || debugType == 'vaporview-waveform'"
+        },
+        {
+          "command": "vaporview.debugger.breakWhenTextMatches",
+          "when": "activeCustomEditorId == 'vaporview.waveformViewer' || debugType == 'vaporview-waveform'"
+        }
+      ],
+      "vaporview.riscvFormat": [
+        {"command": "vaporview.displayAsRiscv", "group": "0_default@1"},
+        {"command": "vaporview.displayAsRiscvNumeric", "group": "0_default@2"},
+        {"command": "vaporview.displayAsRiscvNoAlias", "group": "0_default@3"},
+        {"command": "vaporview.displayAsRiscvNumericNoAlias", "group": "0_default@4"}
+      ],
+      "editor/title": [
+        {
+          "command": "vaporview.reloadFile",
+          "when": "activeCustomEditorId == 'vaporview.waveformViewer' && (resourceExtname == '.vcd' || resourceExtname == '.fst' || resourceExtname == '.ghw' || resourceExtname == '.fsdb' || resourceExtname == '.wcz')",
+          "group": "navigation"
+        },
+        {
+          "command": "vaporview.debugger.start",
+          "when": "activeCustomEditorId == 'vaporview.waveformViewer' && !inDebugMode",
+          "group": "navigation@90"
+        }
+      ],
+      "editor/title/context": [
+        {
+          "command": "vaporview.reloadFile",
+          "group": "1_open",
+          "when": "activeCustomEditorId == 'vaporview.waveformViewer' && (resourceExtname == '.vcd' || resourceExtname == '.fst' || resourceExtname == '.ghw' || resourceExtname == '.fsdb' || resourceExtname == '.wcz')"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "vaporview.searchNetlist",
+          "when": "view == 'waveformViewerNetlistView' && vaporview.netlistSearchable",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "vaporview.addVariable",
+          "when": "viewItem == 'netlistVar' && view == 'waveformViewerNetlistView'",
+          "group": "inline@2"
+        },
+        {
+          "command": "vaporview.showInViewer",
+          "when": "viewItem == 'netlistVar' && view == 'waveformViewerNetlistView'",
+          "group": "inline@1"
+        },
+        {
+          "command": "vaporview.searchScope",
+          "when": "view == 'waveformViewerNetlistView' && vaporview.netlistSearchable && viewItem == 'netlistScope'",
+          "group": "1_default@0"
+        },
+        {
+          "command": "vaporview.addSelected",
+          "when": "viewItem == 'netlistVar' && view == 'waveformViewerNetlistView'",
+          "group": "1_default@1"
+        },
+        {
+          "command": "vaporview.removeSelectedNetlist",
+          "when": "viewItem == 'netlistVar' && view == 'waveformViewerNetlistView'",
+          "group": "1_default@2"
+        },
+        {
+          "command": "vaporview.addAllInScopeShallow",
+          "when": "viewItem == 'netlistScope'",
+          "group": "1_default@4"
+        },
+        {
+          "command": "vaporview.addAllInScopeRecursive",
+          "when": "viewItem == 'netlistScope'",
+          "group": "1_default@5"
+        },
+        {
+          "command": "vaporview.removeAllInScope",
+          "when": "viewItem == 'netlistScope'",
+          "group": "1_default@6"
+        },
+        {
+          "command": "vaporview.showInViewer",
+          "when": "viewItem == 'netlistVar'",
+          "group": "1_default@7"
+        },
+        {
+          "command": "vaporview.copyName",
+          "when": "view == 'waveformViewerNetlistView'",
+          "group": "1_default@8"
+        },
+        {
+          "command": "vaporview.addVariableByInstancePath",
+          "when": "view == 'waveformViewerNetlistView'",
+          "group": "2_addVariable"
+        },
+        {
+          "command": "vaporview.saveViewerSession",
+          "when": "view == 'waveformViewerNetlistView'",
+          "group": "3_saveLoad@1"
+        },
+        {
+          "command": "vaporview.loadViewerSession",
+          "when": "view == 'waveformViewerNetlistView'",
+          "group": "3_saveLoad@2"
+        },
+        {
+          "command": "vaporview.reloadFile",
+          "when": "view == 'waveformViewerNetlistView'",
+          "group": "4_reload"
+        }
+      ],
+      "webview/context": [
+        {
+          "submenu": "vaporview.timeUnit",
+          "group": "1_time_ruler@1"
+        },
+        {
+          "submenu": "vaporview.rulerTimeIncrement",
+          "group": "1_time_ruler@2"
+        },
+        {
+          "submenu": "vaporview.scrollMode",
+          "when": "webviewSection == 'ruler' && activeCustomEditorId == 'vaporview.waveformViewer'",
+          "group": "1_time_ruler@3"
+        },
+        {
+          "command": "vaporview.showRulerLines",
+          "when": "webviewSection == 'ruler' && rulerLines == false && activeCustomEditorId == 'vaporview.waveformViewer'",
+          "group": "3_general_settings@1"
+        },
+        {
+          "command": "vaporview.hideRulerLines",
+          "when": "webviewSection == 'ruler' && rulerLines == true && activeCustomEditorId == 'vaporview.waveformViewer'",
+          "group": "3_general_settings@1"
+        },
+        {
+          "command": "vaporview.fillBitVector",
+          "when": "webviewSection == 'ruler' && fillBitVector == false && activeCustomEditorId == 'vaporview.waveformViewer'",
+          "group": "3_general_settings@2"
+        },
+        {
+          "command": "vaporview.outlineBitVector",
+          "when": "webviewSection == 'ruler' && fillBitVector == true && activeCustomEditorId == 'vaporview.waveformViewer'",
+          "group": "3_general_settings@2"
+        },
+        {
+          "command": "vaporview.enableAnimations",
+          "when": "webviewSection == 'ruler' && activeCustomEditorId == 'vaporview.waveformViewer' && enableAnimations == false",
+          "group": "3_general_settings@3"
+        },
+        {
+          "command": "vaporview.disableAnimations",
+          "when": "webviewSection == 'ruler' && activeCustomEditorId == 'vaporview.waveformViewer' && enableAnimations == true",
+          "group": "3_general_settings@3"
+        },
+        {
+          "command": "vaporview.viewVaporViewSettings",
+          "when": "webviewSection == 'ruler' && activeCustomEditorId == 'vaporview.waveformViewer'",
+          "group": "3_general_settings@4"
+        },
+        {
+          "command": "vaporview.showReadme",
+          "when": "webviewSection == 'ruler' && activeCustomEditorId == 'vaporview.waveformViewer'",
+          "group": "3_general_settings@5"
+        },
+        {
+          "submenu": "vaporview.valueFormat",
+          "when": "webviewSection == 'signal' && activeCustomEditorId == 'vaporview.waveformViewer'",
+          "group": "1_waveform_settings@2"
+        },
+        {
+          "submenu": "vaporview.renderType",
+          "when": "webviewSection == 'signal' && activeCustomEditorId == 'vaporview.waveformViewer'",
+          "group": "1_waveform_settings@3"
+        },
+        {
+          "submenu": "vaporview.highlightEdge",
+          "when": "webviewSection == 'signal' && activeCustomEditorId == 'vaporview.waveformViewer'",
+          "group": "1_waveform_settings@4"
+        },
+        {
+          "submenu": "vaporview.valueColor",
+          "when": "webviewSection == 'signal' && activeCustomEditorId == 'vaporview.waveformViewer'",
+          "group": "1_waveform_settings@5"
+        },
+        {
+          "submenu": "vaporview.rowHeight",
+          "when": "(webviewSection == 'signal') && activeCustomEditorId == 'vaporview.waveformViewer'",
+          "group": "1_waveform_settings@6"
+        },
+        {
+          "submenu": "vaporview.nameType",
+          "when": "webviewSection == 'signal' && activeCustomEditorId == 'vaporview.waveformViewer'",
+          "group": "1_waveform_settings@7"
+        },
+        {
+          "command": "vaporview.increaseVerticalScale",
+          "when": "webviewSection == 'signal' && activeCustomEditorId == 'vaporview.waveformViewer' && isAnalog",
+          "group": "1_waveform_settings@8"
+        },
+        {
+          "command": "vaporview.decreaseVerticalScale",
+          "when": "webviewSection == 'signal' && activeCustomEditorId == 'vaporview.waveformViewer' && isAnalog",
+          "group": "1_waveform_settings@9"
+        },
+        {
+          "command": "vaporview.resetVerticalScale",
+          "when": "webviewSection == 'signal' && activeCustomEditorId == 'vaporview.waveformViewer' && isAnalog",
+          "group": "1_waveform_settings@10"
+        },
+        {
+          "command": "vaporview.removeSignal",
+          "when": "webviewSection == 'signal' && activeCustomEditorId == 'vaporview.waveformViewer'",
+          "group": "2_variables@1"
+        },
+        {
+          "command": "vaporview.showInNetlistView",
+          "when": "webviewSection == 'signal' && activeCustomEditorId == 'vaporview.waveformViewer'",
+          "group": "2_variables@2"
+        },
+        {
+          "command": "vaporview.copyName",
+          "when": "webviewSection == 'signal' && activeCustomEditorId == 'vaporview.waveformViewer'",
+          "group": "2_variables@3"
+        },
+        {
+          "command": "vaporview.copyValueAtMarker",
+          "when": "webviewSection == 'signal' && activeCustomEditorId == 'vaporview.waveformViewer'",
+          "group": "2_variables@4"
+        },
+        {
+          "command": "vaporview.renameSignalGroup",
+          "when": "(webviewSection == 'signal-group' || webviewSection == 'signal-separator') && activeCustomEditorId == 'vaporview.waveformViewer'",
+          "group": "2_variables@5"
+        },
+        {
+          "command": "vaporview.ungroupSignals",
+          "when": "webviewSection == 'signal-group' && activeCustomEditorId == 'vaporview.waveformViewer'",
+          "group": "2_variables@6"
+        },
+        {
+          "command": "vaporview.deleteGroup",
+          "when": "webviewSection == 'signal-group' && activeCustomEditorId == 'vaporview.waveformViewer'",
+          "group": "2_variables@7"
+        },
+        {
+          "command": "vaporview.removeSeparator",
+          "when": "webviewSection == 'signal-separator' && activeCustomEditorId == 'vaporview.waveformViewer'",
+          "group": "2_variables@8"
+        },
+        {
+          "command": "vaporview.newSignalGroup",
+          "when": "webviewSection != 'control-bar' && webviewSection != 'ruler' && activeCustomEditorId == 'vaporview.waveformViewer' && !inputFocus",
+          "group": "3_groups@1"
+        },
+        {
+          "command": "vaporview.newGroupFromSelection",
+          "when": "webviewSection != 'control-bar' && webviewSection != 'ruler' && activeCustomEditorId == 'vaporview.waveformViewer' && !inputFocus",
+          "group": "3_groups@2"
+        },
+        {
+          "command": "vaporview.newSeparator",
+          "when": "webviewSection != 'control-bar' && webviewSection != 'ruler' && activeCustomEditorId == 'vaporview.waveformViewer' && !inputFocus",
+          "group": "3_groups@6"
+        },
+        {
+          "command": "vaporview.newSignalFromBitRange",
+          "when": "(webviewSection == 'waveform-labels' || webviewSection == 'signal') && (activeCustomEditorId == 'vaporview.waveformViewer') && !inputFocus && width > 1",
+          "group": "3_groups@8"
+        },
+        {
+          "submenu": "vaporview.createSignals",
+          "when": "(webviewSection == 'waveform-labels' || webviewSection == 'signal') && (activeCustomEditorId == 'vaporview.waveformViewer') && !inputFocus && width > 1",
+          "group": "3_groups@9"
+        },
+        {
+          "submenu": "vaporview.split",
+          "when": "webviewSection == 'signal' && (activeCustomEditorId == 'vaporview.waveformViewer') && !inputFocus && width > 1 && cmuxDeclared",
+          "group": "3_groups@10"
+        },
+        {
+          "command": "vaporview.saveViewerSession",
+          "group": "4_saveLoad@1",
+          "when": "activeCustomEditorId == 'vaporview.waveformViewer'"
+        },
+        {
+          "command": "vaporview.loadViewerSession",
+          "group": "4_saveLoad@2",
+          "when": "activeCustomEditorId == 'vaporview.waveformViewer'"
+        },
+        {
+          "submenu": "vaporview.waveDrom",
+          "when": "webviewSection != 'control-bar' && webviewSection != 'ruler' && activeCustomEditorId == 'vaporview.waveformViewer' && !inputFocus",
+          "group": "5_waveDrom"
+        },
+        {
+          "command": "vaporview.traceDriver",
+          "when": "webviewSection == 'signal' && activeCustomEditorId == 'vaporview.waveformViewer'",
+          "group": "0_trace@1"
+        },
+        {
+          "command": "vaporview.traceXRoot",
+          "when": "webviewSection == 'signal' && activeCustomEditorId == 'vaporview.waveformViewer'",
+          "group": "0_trace@2"
+        },
+        {
+          "command": "vaporview.sourceLink.showInSource",
+          "when": "webviewSection == 'signal' && activeCustomEditorId == 'vaporview.waveformViewer'",
+          "group": "0_link@1"
+        },
+        {
+          "command": "vaporview.debugger.breakWhenChanges",
+          "when": "webviewSection == 'signal' && activeCustomEditorId == 'vaporview.waveformViewer'",
+          "group": "7_debugger@1"
+        },
+        {
+          "command": "vaporview.debugger.breakWhenEquals",
+          "when": "webviewSection == 'signal' && activeCustomEditorId == 'vaporview.waveformViewer'",
+          "group": "7_debugger@2"
+        },
+        {
+          "command": "vaporview.debugger.breakWhenTextMatches",
+          "when": "webviewSection == 'signal' && activeCustomEditorId == 'vaporview.waveformViewer'",
+          "group": "7_debugger@3"
+        },
+        {
+          "command": "vaporview.debugger.useSelectedAsClock",
+          "when": "webviewSection == 'signal' && activeCustomEditorId == 'vaporview.waveformViewer' && width == 1",
+          "group": "7_debugger@4"
+        }
+      ],
+      "vaporview.valueFormat": [
+        {
+          "command": "vaporview.displayAsEnum",
+          "group": "0_default@1",
+          "when": "webviewSection == 'signal' && enum == true"
+        },
+        {
+          "command": "vaporview.displayAsBinary",
+          "group": "0_default@2",
+          "when": "webviewSection == 'signal' && width > '1'"
+        },
+        {
+          "command": "vaporview.displayAsHexadecimal",
+          "group": "0_default@3",
+          "when": "webviewSection == 'signal' && width > '1'"
+        },
+        {
+          "command": "vaporview.displayAsOctal",
+          "group": "0_default@4",
+          "when": "webviewSection == 'signal' && width > '1'"
+        },
+        {
+          "command": "vaporview.displayAsDecimal",
+          "group": "0_default@5",
+          "when": "webviewSection == 'signal' && width > '1'"
+        },
+        {
+          "command": "vaporview.displayAsDecimalSigned",
+          "group": "0_default@6",
+          "when": "webviewSection == 'signal' && width > '1'"
+        },
+        {
+          "command": "vaporview.displayAsFloat",
+          "group": "0_default@7",
+          "when": "webviewSection == 'signal' && (width == '4' || width == '8' || width == '16' || width == '32' || width == '64')"
+        },
+        {
+          "command": "vaporview.displayAsBFloat",
+          "group": "0_default@8",
+          "when": "webviewSection == 'signal' && width == '16'"
+        },
+        {
+          "command": "vaporview.displayAsTFloat",
+          "group": "0_default@9",
+          "when": "webviewSection == 'signal' && width == '19'"
+        },
+        {
+          "command": "vaporview.displayAsFixedPoint",
+          "group": "0_default@10",
+          "when": "webviewSection == 'signal' && width > '1'"
+        },
+        {
+          "command": "vaporview.displayAsFixedPointSigned",
+          "group": "0_default@11",
+          "when": "webviewSection == 'signal' && width > '1'"
+        },
+        {
+          "command": "vaporview.displayAsAscii",
+          "group": "0_default@12",
+          "when": "webviewSection == 'signal' && width > '1'"
+        },
+        {
+          "command": "vaporview.displayAsEpochTimeNs",
+          "group": "0_default@13",
+          "when": "webviewSection == 'signal' && width >= '64'"
+        },
+        {
+          "submenu": "vaporview.riscvFormat",
+          "group": "1_instruction@1",
+          "when": "webviewSection == 'signal' && width >= '16'"
+        },
+        {
+          "command": "vaporview.loadValueAliases",
+          "group": "2_alias@1",
+          "when": "webviewSection == 'signal'"
+        },
+        {
+          "command": "vaporview.displayAsAliasTable",
+          "group": "2_alias@2",
+          "when": "webviewSection == 'signal'"
+        },
+        {
+          "command": "vaporview.removeValueAlias",
+          "group": "2_alias@3",
+          "when": "webviewSection == 'signal'"
+        },
+        {
+          "command": "vaporview.sourceLink.showEnumNames",
+          "group": "0_default@0",
+          "when": "webviewSection == 'signal' && width > '1'"
+        }
+      ],
+      "vaporview.valueColor": [
+        {
+          "command": "vaporview.defaultColor1",
+          "when": "webviewSection == 'signal'",
+          "group": "0_default@1"
+        },
+        {
+          "command": "vaporview.defaultColor2",
+          "when": "webviewSection == 'signal'",
+          "group": "0_default@2"
+        },
+        {
+          "command": "vaporview.defaultColor3",
+          "when": "webviewSection == 'signal'",
+          "group": "0_default@3"
+        },
+        {
+          "command": "vaporview.defaultColor4",
+          "when": "webviewSection == 'signal'",
+          "group": "0_default@4"
+        },
+        {
+          "command": "vaporview.defaultColor5",
+          "when": "webviewSection == 'signal'",
+          "group": "0_default@5"
+        },
+        {
+          "command": "vaporview.defaultColor6",
+          "when": "webviewSection == 'signal'",
+          "group": "0_default@6"
+        },
+        {
+          "command": "vaporview.defaultColor7",
+          "when": "webviewSection == 'signal'",
+          "group": "0_default@7"
+        },
+        {
+          "command": "vaporview.defaultColor8",
+          "when": "webviewSection == 'signal'",
+          "group": "0_default@8"
+        }
+      ],
+      "vaporview.rowHeight": [
+        {
+          "command": "vaporview.rowHeight1x",
+          "when": "(webviewSection == 'signal' || webviewSection == 'signal-separator')",
+          "group": "1_default@1"
+        },
+        {
+          "command": "vaporview.rowHeight2x",
+          "when": "(webviewSection == 'signal' || webviewSection == 'signal-separator')",
+          "group": "1_default@2"
+        },
+        {
+          "command": "vaporview.rowHeight4x",
+          "when": "(webviewSection == 'signal' || webviewSection == 'signal-separator')",
+          "group": "1_default@3"
+        },
+        {
+          "command": "vaporview.rowHeight8x",
+          "when": "(webviewSection == 'signal' || webviewSection == 'signal-separator')",
+          "group": "1_default@3"
+        }
+      ],
+      "vaporview.nameType": [
+        {
+          "command": "vaporview.setNameTypeFullPath",
+          "when": "webviewSection == 'signal'",
+          "group": "1_default@1"
+        },
+        {
+          "command": "vaporview.setNameTypeSignalName",
+          "when": "webviewSection == 'signal'",
+          "group": "1_default@2"
+        },
+        {
+          "command": "vaporview.setNameTypeCustom",
+          "when": "webviewSection == 'signal'",
+          "group": "1_default@3"
+        },
+        {
+          "command": "vaporview.renameSignalGroup",
+          "when": "webviewSection == 'signal'",
+          "group": "1_default@4"
+        }
+      ],
+      "vaporview.split": [
+        {
+          "command": "vaporview.splitDeclared",
+          "when": "cmuxDeclared",
+          "group": "1_default@0"
+        }
+      ],
+      "vaporview.createSignals": [
+        {
+          "command": "vaporview.createSignalsForAllBits",
+          "when": "(webviewSection == 'waveform-labels' || webviewSection == 'signal') && (activeCustomEditorId == 'vaporview.waveformViewer') && !inputFocus && width > 1 && width <= 32",
+          "group": "1_default@1"
+        },
+        {
+          "command": "vaporview.createSignalsForAllNibbles",
+          "when": "(webviewSection == 'waveform-labels' || webviewSection == 'signal') && (activeCustomEditorId == 'vaporview.waveformViewer') && !inputFocus && width > 4 && width <= 128",
+          "group": "1_default@2"
+        },
+        {
+          "command": "vaporview.createSignalsForAllBytes",
+          "when": "(webviewSection == 'waveform-labels' || webviewSection == 'signal') && (activeCustomEditorId == 'vaporview.waveformViewer') && !inputFocus && width > 8 && width <= 256",
+          "group": "1_default@3"
+        },
+        {
+          "command": "vaporview.createSignalsForAllWords",
+          "when": "(webviewSection == 'waveform-labels' || webviewSection == 'signal') && (activeCustomEditorId == 'vaporview.waveformViewer') && !inputFocus && width > 16 && width <= 512",
+          "group": "1_default@4"
+        },
+        {
+          "command": "vaporview.createSignalsForAllDoubleWords",
+          "when": "(webviewSection == 'waveform-labels' || webviewSection == 'signal') && (activeCustomEditorId == 'vaporview.waveformViewer') && !inputFocus && width > 32 && width <= 1024",
+          "group": "1_default@5"
+        },
+        {
+          "command": "vaporview.createSignalsForAllQuadWords",
+          "when": "(webviewSection == 'waveform-labels' || webviewSection == 'signal') && (activeCustomEditorId == 'vaporview.waveformViewer') && !inputFocus && width > 64 && width <= 2048",
+          "group": "1_default@6"
+        },
+        {
+          "command": "vaporview.createSignalsForAllCustomLength",
+          "when": "(webviewSection == 'waveform-labels' || webviewSection == 'signal') && (activeCustomEditorId == 'vaporview.waveformViewer') && !inputFocus && width > 2 && width <= 256",
+          "group": "1_default@7"
+        }
+      ],
+      "vaporview.timeUnit": [
+        {
+          "command": "vaporview.setTimeUnitsSeconds",
+          "when": "s == true",
+          "group": "1_default@1"
+        },
+        {
+          "command": "vaporview.setTimeUnitsMilliseconds",
+          "when": "ms == true",
+          "group": "1_default@2"
+        },
+        {
+          "command": "vaporview.setTimeUnitsMicroseconds",
+          "when": "µs == true",
+          "group": "1_default@3"
+        },
+        {
+          "command": "vaporview.setTimeUnitsNanoseconds",
+          "when": "ns == true",
+          "group": "1_default@4"
+        },
+        {
+          "command": "vaporview.setTimeUnitsPicoseconds",
+          "when": "ps == true",
+          "group": "1_default@5"
+        },
+        {
+          "command": "vaporview.setTimeUnitsFemtoseconds",
+          "when": "fs == true",
+          "group": "1_default@6"
+        }
+      ],
+      "vaporview.rulerTimeIncrement": [
+        {
+          "command": "vaporview.autoRulerTimeIncrement",
+          "when": "webviewSection == 'ruler'",
+          "group": "1_default@1"
+        },
+        {
+          "command": "vaporview.setRulerTimeIncrement",
+          "when": "webviewSection == 'ruler'",
+          "group": "1_default@2"
+        }
+      ],
+      "vaporview.scrollMode": [
+        {
+          "command": "vaporview.setMouseScrollingMode",
+          "when": "webviewSection == 'ruler'",
+          "group": "1_default@1"
+        },
+        {
+          "command": "vaporview.setTouchpadScrollingMode",
+          "when": "webviewSection == 'ruler'",
+          "group": "1_default@2"
+        },
+        {
+          "command": "vaporview.setAutoScrollingMode",
+          "when": "webviewSection == 'ruler'",
+          "group": "1_default@3"
+        }
+      ],
+      "vaporview.renderType": [
+        {
+          "command": "vaporview.renderMultiBit",
+          "when": "webviewSection == 'signal' && (width > '1' || type == 'Real')",
+          "group": "1_default@1"
+        },
+        {
+          "command": "vaporview.renderLinear",
+          "when": "webviewSection == 'signal' && (width > '1' || type == 'Real')",
+          "group": "2_analog@2"
+        },
+        {
+          "command": "vaporview.renderStepped",
+          "when": "webviewSection == 'signal' && (width > '1' || type == 'Real')",
+          "group": "2_analog@3"
+        },
+        {
+          "command": "vaporview.renderLinearSigned",
+          "when": "webviewSection == 'signal' && (width > '1')",
+          "group": "2_analog@4"
+        },
+        {
+          "command": "vaporview.renderSteppedSigned",
+          "when": "webviewSection == 'signal' && (width > '1')",
+          "group": "2_analog@5"
+        }
+      ],
+      "vaporview.highlightEdge": [
+        {
+          "command": "vaporview.annotatePosedge",
+          "when": "webviewSection == 'signal' && width == '1'",
+          "group": "1_default@1"
+        },
+        {
+          "command": "vaporview.annotateNegedge",
+          "when": "webviewSection == 'signal' && width == '1'",
+          "group": "1_default@2"
+        },
+        {
+          "command": "vaporview.annotateAllEdge",
+          "when": "webviewSection == 'signal'",
+          "group": "1_default@3"
+        },
+        {
+          "command": "vaporview.annotateNone",
+          "when": "webviewSection == 'signal'",
+          "group": "1_default@4"
+        }
+      ],
+      "vaporview.waveDrom": [
+        {
+          "command": "vaporview.copyWaveDrom"
+        },
+        {
+          "command": "vaporview.unsetWaveDromClock"
+        },
+        {
+          "command": "vaporview.setWaveDromClockRising"
+        },
+        {
+          "command": "vaporview.setWaveDromClockFalling"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "vaporview.traceDriverFromEditor",
+          "when": "editorLangId == systemverilog || editorLangId == verilog",
+          "group": "navigation@90"
+        },
+        {
+          "command": "vaporview.traceXRootFromEditor",
+          "when": "editorLangId == systemverilog || editorLangId == verilog",
+          "group": "navigation@91"
+        },
+        {
+          "command": "vaporview.sourceLink.addSignal",
+          "when": "(resourceExtname =~ /^\\.(sv|svh|v|vh|svi|svp)$/ || editorLangId == systemverilog || editorLangId == verilog) && vaporview.activated",
+          "group": "navigation@90"
+        },
+        {
+          "command": "vaporview.sourceLink.addScope",
+          "when": "(resourceExtname =~ /^\\.(sv|svh|v|vh|svi|svp)$/ || editorLangId == systemverilog || editorLangId == verilog) && vaporview.activated",
+          "group": "navigation@90"
+        },
+        {
+          "command": "vaporview.sourceLink.chooseProfile",
+          "when": "(resourceExtname =~ /^\\.(sv|svh|v|vh|svi|svp)$/ || editorLangId == systemverilog || editorLangId == verilog) && vaporview.activated",
+          "group": "navigation@91"
+        },
+        {
+          "command": "vaporview.sourceLink.setTopLevelHere",
+          "when": "(resourceExtname =~ /^\\.(sv|svh|v|vh|svi|svp)$/ || editorLangId == systemverilog || editorLangId == verilog) && vaporview.activated",
+          "group": "navigation@92"
+        },
+        {
+          "command": "vaporview.sourceLink.resetTopLevel",
+          "when": "(resourceExtname =~ /^\\.(sv|svh|v|vh|svi|svp)$/ || editorLangId == systemverilog || editorLangId == verilog) && vaporview.activated && vaporview.slangTarget == topLevel",
+          "group": "navigation@93"
+        },
+        {
+          "command": "vaporview.sourceLink.clearBuildFile",
+          "when": "(resourceExtname =~ /^\\.(sv|svh|v|vh|svi|svp)$/ || editorLangId == systemverilog || editorLangId == verilog) && vaporview.activated && vaporview.slangTarget == buildFile",
+          "group": "navigation@94"
+        },
+        {
+          "command": "vaporview.sourceLink.showValuesFor",
+          "when": "(resourceExtname =~ /^\\.(sv|svh|v|vh|svi|svp)$/ || editorLangId == systemverilog || editorLangId == verilog) && vaporview.activated",
+          "group": "navigation@95"
+        },
+        {
+          "command": "vaporview.sourceLink.useAsBuildFile",
+          "when": "resourceExtname == .f && vaporview.activated",
+          "group": "navigation@96"
+        },
+        {
+          "command": "vaporview.debugger.evaluateAtCycle",
+          "when": "debugType == 'vaporview-waveform' && editorTextFocus",
+          "group": "debug@10"
+        },
+        {
+          "command": "vaporview.debugger.chooseInstance",
+          "when": "debugType == 'vaporview-waveform' && editorTextFocus",
+          "group": "debug@11"
+        },
+        {
+          "command": "vaporview.debugger.toggleLineBreakpointAnyInstance",
+          "when": "resourceExtname =~ /\\.(sv|svh|v|vh)$/",
+          "group": "debug@12"
+        }
+      ]
+    },
+    "commands": [
+      {"command": "vaporview.displayAsRiscv", "title": "RISC-V (ABI names)"},
+      {"command": "vaporview.displayAsRiscvNumeric", "title": "RISC-V (x0-x31)"},
+      {"command": "vaporview.displayAsRiscvNoAlias", "title": "RISC-V (no pseudo-instructions)"},
+      {"command": "vaporview.displayAsRiscvNumericNoAlias", "title": "RISC-V (x0-x31, no pseudo-instructions)"},
+      {"command": "vaporview.loadValueAliases", "title": "Load Value Alias File...", "category": "VaporView FSDB"},
+      {"command": "vaporview.displayAsAliasTable", "title": "Alias Table..."},
+      {"command": "vaporview.removeValueAlias", "title": "Remove Alias"},
+      {
+        "command": "vaporview.openFile",
+        "title": "Open File with VaporView FSDB",
+        "category": "VaporView FSDB"
+      },
+      {
+        "command": "vaporview.wcp.openWaveform",
+        "title": "Open Waveform with VaporView FSDB WCP",
+        "category": "VaporView FSDB"
+      },
+      {
+        "command": "waveformViewer.addVariable",
+        "title": "Add to Waveform Viewer"
+      },
+      {
+        "command": "waveformViewer.removeVariable",
+        "title": "Remove from Waveform Viewer"
+      },
+      {
+        "command": "waveformViewer.revealInNetlistView",
+        "title": "Show in Netlist View"
+      },
+      {
+        "command": "waveformViewer.setMarker",
+        "title": "Set Marker"
+      },
+      {
+        "command": "waveformViewer.getOpenDocuments",
+        "title": "Get Open Documents"
+      },
+      {
+        "command": "waveformViewer.getViewerState",
+        "title": "Get Viewer State"
+      },
+      {
+        "command": "waveformViewer.getValuesAtTime",
+        "title": "Get Values at Time"
+      },
+      {
+        "command": "vaporview.addSelected",
+        "title": "Add Selected"
+      },
+      {
+        "command": "vaporview.addVariable",
+        "title": "Add Variable",
+        "icon": "$(add)"
+      },
+      {
+        "command": "vaporview.searchNetlist",
+        "title": "Search Netlist",
+        "icon": "$(search)",
+        "category": "VaporView FSDB"
+      },
+      {
+        "command": "vaporview.searchScope",
+        "title": "Search Scope",
+        "icon": "$(search)",
+        "category": "VaporView FSDB"
+      },
+      {
+        "command": "vaporview.addVariableByInstancePath",
+        "title": "Add Variable by Name...",
+        "category": "VaporView FSDB"
+      },
+      {
+        "command": "vaporview.addAllInScopeShallow",
+        "title": "Add All Variables in Scope (Shallow)"
+      },
+      {
+        "command": "vaporview.addAllInScopeRecursive",
+        "title": "Add All Variables in Scope (Recursive)"
+      },
+      {
+        "command": "vaporview.removeSelectedNetlist",
+        "title": "Remove Selected"
+      },
+      {
+        "command": "vaporview.removeAllInScope",
+        "title": "Remove All Variables in Scope"
+      },
+      {
+        "command": "vaporview.removeSignal",
+        "title": "Remove Variable"
+      },
+      {
+        "command": "vaporview.showInNetlistView",
+        "title": "Show in Netlist View"
+      },
+      {
+        "command": "vaporview.showInViewer",
+        "title": "Show in Viewer",
+        "icon": "$(inspect)"
+      },
+      {
+        "command": "vaporview.copyName",
+        "title": "Copy Variable Name"
+      },
+      {
+        "command": "vaporview.copyValueAtMarker",
+        "title": "Copy Value at Marker"
+      },
+      {
+        "command": "vaporview.newSignalGroup",
+        "title": "New Group"
+      },
+      {
+        "command": "vaporview.newGroupFromSelection",
+        "title": "New Group from Selection"
+      },
+      {
+        "command": "vaporview.renameSignalGroup",
+        "title": "Rename"
+      },
+      {
+        "command": "vaporview.ungroupSignals",
+        "title": "Ungroup Signals"
+      },
+      {
+        "command": "vaporview.deleteGroup",
+        "title": "Delete Group"
+      },
+      {
+        "command": "vaporview.newSeparator",
+        "title": "New Separator"
+      },
+      {
+        "command": "vaporview.removeSeparator",
+        "title": "Remove Separator"
+      },
+      {
+        "command": "vaporview.newSignalFromBitRange",
+        "title": "New Signal From Bit Range..."
+      },
+      {
+        "command": "vaporview.createSignalsForAllBits",
+        "title": "Bits"
+      },
+      {
+        "command": "vaporview.createSignalsForAllNibbles",
+        "title": "Nibbles"
+      },
+      {
+        "command": "vaporview.createSignalsForAllBytes",
+        "title": "Bytes"
+      },
+      {
+        "command": "vaporview.createSignalsForAllWords",
+        "title": "Words"
+      },
+      {
+        "command": "vaporview.createSignalsForAllDoubleWords",
+        "title": "Double Words"
+      },
+      {
+        "command": "vaporview.createSignalsForAllQuadWords",
+        "title": "Quad Words"
+      },
+      {
+        "command": "vaporview.createSignalsForAllCustomLength",
+        "title": "Custom Length..."
+      },
+      {
+        "command": "vaporview.displayAsBinary",
+        "title": "Binary"
+      },
+      {
+        "command": "vaporview.displayAsDecimal",
+        "title": "Decimal (Unsigned)"
+      },
+      {
+        "command": "vaporview.displayAsDecimalSigned",
+        "title": "Decimal (Signed)"
+      },
+      {
+        "command": "vaporview.displayAsHexadecimal",
+        "title": "Hexadecimal"
+      },
+      {
+        "command": "vaporview.displayAsOctal",
+        "title": "Octal"
+      },
+      {
+        "command": "vaporview.displayAsFloat",
+        "title": "Floating Point"
+      },
+      {
+        "command": "vaporview.displayAsBFloat",
+        "title": "BFloat 16"
+      },
+      {
+        "command": "vaporview.displayAsTFloat",
+        "title": "TensorFloat 32"
+      },
+      {
+        "command": "vaporview.displayAsAscii",
+        "title": "ASCII"
+      },
+      {
+        "command": "vaporview.displayAsEpochTimeNs",
+        "title": "Epoch Time (ns)"
+      },
+      {
+        "command": "vaporview.displayAsEnum",
+        "title": "Enum"
+      },
+      {
+        "command": "vaporview.displayAsFixedPoint",
+        "title": "Fixed Point..."
+      },
+      {
+        "command": "vaporview.displayAsFixedPointSigned",
+        "title": "Signed Fixed Point..."
+      },
+      {
+        "command": "vaporview.renderMultiBit",
+        "title": "Multi Bit"
+      },
+      {
+        "command": "vaporview.renderLinear",
+        "title": "Linear"
+      },
+      {
+        "command": "vaporview.renderStepped",
+        "title": "Stepped"
+      },
+      {
+        "command": "vaporview.renderLinearSigned",
+        "title": "Linear (Signed)"
+      },
+      {
+        "command": "vaporview.renderSteppedSigned",
+        "title": "Stepped (Signed)"
+      },
+      {
+        "command": "vaporview.annotatePosedge",
+        "title": "Rising Edge"
+      },
+      {
+        "command": "vaporview.annotateNegedge",
+        "title": "Falling Edge"
+      },
+      {
+        "command": "vaporview.annotateAllEdge",
+        "title": "All Edges"
+      },
+      {
+        "command": "vaporview.annotateNone",
+        "title": "None"
+      },
+      {
+        "command": "vaporview.defaultColor1",
+        "title": "Color 1"
+      },
+      {
+        "command": "vaporview.defaultColor2",
+        "title": "Color 2"
+      },
+      {
+        "command": "vaporview.defaultColor3",
+        "title": "Color 3"
+      },
+      {
+        "command": "vaporview.defaultColor4",
+        "title": "Color 4"
+      },
+      {
+        "command": "vaporview.defaultColor5",
+        "title": "Color 5"
+      },
+      {
+        "command": "vaporview.defaultColor6",
+        "title": "Color 6"
+      },
+      {
+        "command": "vaporview.defaultColor7",
+        "title": "Color 7"
+      },
+      {
+        "command": "vaporview.defaultColor8",
+        "title": "Color 8"
+      },
+      {
+        "command": "vaporview.rowHeight1x",
+        "title": "1x"
+      },
+      {
+        "command": "vaporview.rowHeight2x",
+        "title": "2x"
+      },
+      {
+        "command": "vaporview.rowHeight4x",
+        "title": "4x"
+      },
+      {
+        "command": "vaporview.rowHeight8x",
+        "title": "8x"
+      },
+      {
+        "command": "vaporview.setNameTypeFullPath",
+        "title": "Full Path"
+      },
+      {
+        "command": "vaporview.setNameTypeSignalName",
+        "title": "Name Only"
+      },
+      {
+        "command": "vaporview.setNameTypeCustom",
+        "title": "Custom Name"
+      },
+      {
+        "command": "vaporview.increaseVerticalScale",
+        "title": "Increase Vertical Scale"
+      },
+      {
+        "command": "vaporview.decreaseVerticalScale",
+        "title": "Decrease Vertical Scale"
+      },
+      {
+        "command": "vaporview.resetVerticalScale",
+        "title": "Reset Vertical Scale"
+      },
+      {
+        "command": "vaporview.setTimeUnitsSeconds",
+        "title": "s"
+      },
+      {
+        "command": "vaporview.setTimeUnitsMilliseconds",
+        "title": "ms"
+      },
+      {
+        "command": "vaporview.setTimeUnitsMicroseconds",
+        "title": "µs"
+      },
+      {
+        "command": "vaporview.setTimeUnitsNanoseconds",
+        "title": "ns"
+      },
+      {
+        "command": "vaporview.setTimeUnitsPicoseconds",
+        "title": "ps"
+      },
+      {
+        "command": "vaporview.setTimeUnitsFemtoseconds",
+        "title": "fs"
+      },
+      {
+        "command": "vaporview.showRulerLines",
+        "title": "Show Ruler Lines"
+      },
+      {
+        "command": "vaporview.hideRulerLines",
+        "title": "Hide Ruler Lines"
+      },
+      {
+        "command": "vaporview.setRulerTimeIncrement",
+        "title": "Custom..."
+      },
+      {
+        "command": "vaporview.autoRulerTimeIncrement",
+        "title": "Auto"
+      },
+      {
+        "command": "vaporview.fillBitVector",
+        "title": "Shade Bit Vectors"
+      },
+      {
+        "command": "vaporview.outlineBitVector",
+        "title": "Outline Bit Vectors"
+      },
+      {
+        "command": "vaporview.enableAnimations",
+        "title": "Enable Animations"
+      },
+      {
+        "command": "vaporview.disableAnimations",
+        "title": "Disable Animations"
+      },
+      {
+        "command": "vaporview.setMouseScrollingMode",
+        "title": "Mouse Wheel"
+      },
+      {
+        "command": "vaporview.setTouchpadScrollingMode",
+        "title": "Touchpad"
+      },
+      {
+        "command": "vaporview.setAutoScrollingMode",
+        "title": "Auto Detect"
+      },
+      {
+        "command": "vaporview.viewVaporViewSettings",
+        "title": "More Settings...",
+        "category": "VaporView FSDB"
+      },
+      {
+        "command": "vaporview.showReadme",
+        "title": "Show VaporView FSDB Readme",
+        "category": "VaporView FSDB"
+      },
+      {
+        "command": "vaporview.copyWaveDrom",
+        "title": "Copy Selection as WaveDrom"
+      },
+      {
+        "command": "vaporview.setWaveDromClockRising",
+        "title": "Set WaveDrom Clock Rising"
+      },
+      {
+        "command": "vaporview.setWaveDromClockFalling",
+        "title": "Set WaveDrom Clock Falling"
+      },
+      {
+        "command": "vaporview.unsetWaveDromClock",
+        "title": "Unset WaveDrom Clock"
+      },
+      {
+        "command": "vaporview.saveViewerSession",
+        "title": "Save VaporView FSDB Session...",
+        "category": "VaporView FSDB"
+      },
+      {
+        "command": "vaporview.loadViewerSession",
+        "title": "Load VaporView FSDB Session...",
+        "category": "VaporView FSDB"
+      },
+      {
+        "command": "vaporview.reloadFile",
+        "title": "Reload File",
+        "category": "VaporView FSDB",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "vaporview.zoomToFit",
+        "title": "Zoom to Fit",
+        "category": "VaporView FSDB"
+      },
+      {
+        "command": "vaporview.openRemoteViewer",
+        "title": "Open Remote Viewer",
+        "category": "VaporView FSDB"
+      },
+      {
+        "command": "vaporview.traceDriver",
+        "title": "Trace Driver at Marker",
+        "category": "VaporView FSDB"
+      },
+      {
+        "command": "vaporview.traceXRoot",
+        "title": "Trace to Root",
+        "category": "VaporView FSDB"
+      },
+      {
+        "command": "vaporview.traceDriverFromEditor",
+        "title": "Trace Driver at Marker (Signal under Cursor)",
+        "category": "VaporView FSDB"
+      },
+      {
+        "command": "vaporview.traceXRootFromEditor",
+        "title": "Trace to Root (Signal under Cursor)",
+        "category": "VaporView FSDB"
+      },
+      {
+        "command": "vaporview.traceBack",
+        "title": "Trace Driver: Back",
+        "category": "VaporView FSDB"
+      },
+      {
+        "command": "vaporview.traceForward",
+        "title": "Trace Driver: Forward",
+        "category": "VaporView FSDB"
+      },
+      {
+        "command": "vaporview.traceCancel",
+        "title": "Trace to Root: Cancel",
+        "category": "VaporView FSDB"
+      },
+      {
+        "command": "vaporview.traceVerdiCheck",
+        "title": "Trace Driver: Cross-Check with Your Verdi Installation",
+        "category": "VaporView FSDB"
+      },
+      {
+        "command": "vaporview.sourceLink.addSignal",
+        "title": "Add Signal to Waveform",
+        "category": "VaporView FSDB"
+      },
+      {
+        "command": "vaporview.sourceLink.addScope",
+        "title": "Add All Signals in Scope to Waveform",
+        "category": "VaporView FSDB"
+      },
+      {
+        "command": "vaporview.splitDeclared",
+        "title": "By Declared Dimensions",
+        "category": "VaporView FSDB"
+      },
+      {
+        "command": "vaporview.sourceLink.showInSource",
+        "title": "Show Waveform Signal in Source",
+        "category": "VaporView FSDB"
+      },
+      {
+        "command": "vaporview.sourceLink.navigateBack",
+        "title": "Waveform Link: Go Back",
+        "category": "VaporView FSDB"
+      },
+      {
+        "command": "vaporview.sourceLink.navigateForward",
+        "title": "Waveform Link: Go Forward",
+        "category": "VaporView FSDB"
+      },
+      {
+        "command": "vaporview.sourceLink.editPathMapping",
+        "title": "Waveform Path Mapping...",
+        "category": "VaporView FSDB"
+      },
+      {
+        "command": "vaporview.sourceLink.setTopLevel",
+        "title": "Waveform Link: Set SystemVerilog Top Level",
+        "category": "VaporView FSDB"
+      },
+      {
+        "command": "vaporview.sourceLink.chooseProfile",
+        "title": "slang: Choose Profile…",
+        "category": "VaporView FSDB"
+      },
+      {
+        "command": "vaporview.sourceLink.useFileAsTopLevel",
+        "title": "slang: Use This File as Top Level",
+        "category": "VaporView FSDB"
+      },
+      {
+        "command": "vaporview.sourceLink.setTopLevelHere",
+        "title": "Set as SystemVerilog Top Level",
+        "category": "VaporView FSDB"
+      },
+      {
+        "command": "vaporview.sourceLink.resetTopLevel",
+        "title": "Reset Top Level",
+        "category": "VaporView FSDB"
+      },
+      {
+        "command": "vaporview.sourceLink.useAsBuildFile",
+        "title": "Use as SystemVerilog Build File",
+        "category": "VaporView FSDB"
+      },
+      {
+        "command": "vaporview.sourceLink.clearBuildFile",
+        "title": "Clear Build File",
+        "category": "VaporView FSDB"
+      },
+      {
+        "command": "vaporview.sourceLink.showValuesFor",
+        "title": "Show Waveform Values For…",
+        "category": "VaporView FSDB"
+      },
+      {
+        "command": "vaporview.sourceLink.exploreMode",
+        "title": "slang: Explore Mode (No Top)",
+        "category": "VaporView FSDB"
+      },
+      {
+        "command": "vaporview.sourceLink.editProfiles",
+        "title": "slang: Edit Profiles…",
+        "category": "VaporView FSDB"
+      },
+      {
+        "command": "vaporview.sourceLink.restartSlang",
+        "title": "slang: Restart slang-server",
+        "category": "VaporView FSDB"
+      },
+      {
+        "command": "vaporview.sourceLink.undoProfileAutoPick",
+        "title": "slang: Undo Profile Auto-Pick",
+        "category": "VaporView FSDB"
+      },
+      {
+        "command": "vaporview.sourceLink.showEnumNames",
+        "title": "Enum Names",
+        "category": "VaporView FSDB"
+      },
+      {
+        "command": "vaporview.debugger.start",
+        "title": "Debug This Waveform",
+        "category": "VaporView FSDB",
+        "icon": "$(debug-alt)"
+      },
+      {
+        "command": "vaporview.debugger.stepForward",
+        "title": "Step One Cycle Forward",
+        "category": "VaporView FSDB",
+        "icon": "$(debug-step-over)"
+      },
+      {
+        "command": "vaporview.debugger.stepBack",
+        "title": "Step One Cycle Back",
+        "category": "VaporView FSDB",
+        "icon": "$(debug-step-back)"
+      },
+      {
+        "command": "vaporview.debugger.first",
+        "title": "Go to First Cycle",
+        "category": "VaporView FSDB",
+        "icon": "$(debug-restart)"
+      },
+      {
+        "command": "vaporview.debugger.last",
+        "title": "Go to Last Cycle",
+        "category": "VaporView FSDB",
+        "icon": "$(debug-continue)"
+      },
+      {
+        "command": "vaporview.debugger.continue",
+        "title": "Continue to Next Breakpoint Hit",
+        "category": "VaporView FSDB",
+        "icon": "$(debug-continue)"
+      },
+      {
+        "command": "vaporview.debugger.reverseContinue",
+        "title": "Reverse Continue to Previous Breakpoint Hit",
+        "category": "VaporView FSDB",
+        "icon": "$(debug-reverse-continue)"
+      },
+      {
+        "command": "vaporview.debugger.togglePlay",
+        "title": "Play / Pause",
+        "category": "VaporView FSDB",
+        "icon": "$(play)"
+      },
+      {
+        "command": "vaporview.debugger.faster",
+        "title": "Play Faster",
+        "category": "VaporView FSDB"
+      },
+      {
+        "command": "vaporview.debugger.slower",
+        "title": "Play Slower",
+        "category": "VaporView FSDB"
+      },
+      {
+        "command": "vaporview.debugger.useSelectedAsClock",
+        "title": "Use Selected Signal as Clock",
+        "category": "VaporView FSDB"
+      },
+      {
+        "command": "vaporview.debugger.defaultClock",
+        "title": "Use Automatic Clock",
+        "category": "VaporView FSDB"
+      },
+      {
+        "command": "vaporview.debugger.evaluate",
+        "title": "Evaluate Expression…",
+        "category": "VaporView FSDB"
+      },
+      {
+        "command": "vaporview.debugger.evaluateAtCycle",
+        "title": "Evaluate at Cycle…",
+        "category": "VaporView FSDB"
+      },
+      {
+        "command": "vaporview.debugger.addWatch",
+        "title": "Add Watch Expression",
+        "category": "VaporView FSDB"
+      },
+      {
+        "command": "vaporview.debugger.breakWhenChanges",
+        "title": "Break When Changes",
+        "category": "VaporView FSDB"
+      },
+      {
+        "command": "vaporview.debugger.breakWhenEquals",
+        "title": "Break When Equals…",
+        "category": "VaporView FSDB"
+      },
+      {
+        "command": "vaporview.debugger.breakWhenTextMatches",
+        "title": "Break When Text Matches…",
+        "category": "VaporView FSDB"
+      },
+      {
+        "command": "vaporview.debugger.toggleLineBreakpointAnyInstance",
+        "title": "Toggle Line Breakpoint in Any Instance of the Module",
+        "category": "VaporView FSDB"
+      },
+      {
+        "command": "vaporview.debugger.chooseInstance",
+        "title": "Choose Instance for Module…",
+        "category": "VaporView FSDB"
+      },
+      {
+        "command": "vaporview.debugger.stop",
+        "title": "Stop Debugging the Waveform",
+        "category": "VaporView FSDB",
+        "icon": "$(debug-stop)"
+      }
+    ]
+  },
+  "dependencies": {
+    "@js-temporal/polyfill": "^0.5.1",
+    "@vscode/codicons": "0.0.35",
+    "@vscode/wasm-component-model": "1.0.2",
+    "culori": "^4.0.2",
+    "lz4js": "^0.2.0",
+    "node-addon-api": "^8.3.1",
+    "shiki": "^3.23.0",
+    "vscode-shiki-bridge": "^0.5.2"
+  },
+  "devDependencies": {
+    "@types/culori": "^4.0.1",
+    "@types/node": "^18.14.6",
+    "@types/vscode": "^1.102.0",
+    "@typescript-eslint/eslint-plugin": "^7.6.0",
+    "@typescript-eslint/parser": "^7.6.0",
+    "@vscode/test-electron": "^2.5.2",
+    "concurrently": "^9.2.5",
+    "esbuild": "^0.28.1",
+    "eslint": "^8.57.0",
+    "npm-run-all": "^4.1.5",
+    "playwright-core": "1.65.0",
+    "serve": "^14.2.5",
+    "ts-loader": "^9.5.1",
+    "typescript": "^5.7.2",
+    "webpack": "^5.96.1",
+    "webpack-cli": "^5.1.4"
+  },
+  "scripts": {
+    "build": "npm run compile",
+    "compile-wasm": "npm run generate:model && bash tools/wellen/ensure-wasm.sh",
+    "compile-wasm-dev": "npm run generate:model && cargo build --target wasm32-unknown-unknown --release",
+    "generate:model": "wit2ts --outDir ./src/wellen_parser ./src/wellen_parser",
+    "compile-addon": "node-gyp rebuild",
+    "compile": "npm run compile-wasm && npm run check-types && node esbuild.js",
+    "compile-fsdb": "npm run compile-addon && npm run compile-wasm && npm run check-types && node esbuild.js",
+    "check-types": "tsc --noEmit && tsc --noEmit -p tsconfig.webview.json",
+    "test:link-unit": "tsc -p tsconfig.link-test.json && node --test out/link-test/src/cmux/link/test/profiles.test.js out/link-test/src/cmux/link/test/point_value.test.js out/link-test/src/cmux/link/test/literals.test.js",
+    "test:wcp": "tsc -p tsconfig.wcp-test.json && node --test out/wcp-test/src/extension_core/test/wcp_server.test.js",
+    "lint": "eslint src/extension_core src/common src/webview packages/vaporview-api --ext .ts",
+    "watch": "npm-run-all -p watch:*",
+    "watch:esbuild": "node esbuild.js --watch",
+    "watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
+    "vscode:prepublish": "node tools/prepublish.mjs",
+    "package": "npm run compile-wasm && npm run check-types && node esbuild.js --production",
+    "package-fsdb": "npm run compile-addon && npm run compile-wasm && npm run check-types && node esbuild.js --production"
+  },
+  "gypfile": false
+}

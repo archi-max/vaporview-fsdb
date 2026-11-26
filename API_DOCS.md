@@ -1,0 +1,536 @@
+# Vaporview API
+
+This is the official API for Vaporview. This will remain stable for all future releases. Anything listed as a proposed API is subject to change. If you would like to see anything added to the API, please file an [issue](https://github.com/Lramseyer/vaporview/issues), or add it to the github [discussions](https://github.com/Lramseyer/vaporview/discussions/63).
+
+If you need help implementing an API feature into your extension, feel free to reach out to me directly or hop on [matrix chat](https://element.fossi-chat.org/#/room/#vaporview:fossi-chat.org).
+
+Planned updates to the API
+
+- More commands
+- Custom name translations
+- Custom transactions
+- URI schema for netlist elements
+
+One point of caution is that the instance path can vary depending on tools used to elaborate the RTL, so there may be small changes made to how instance paths are listed. Please let me know if you run into any issues reconciling instance paths!
+
+## Overview
+
+Vaporview is designed with the VSCode IDE experience in mind, so this document serves to help enable extension interoperability. This document outlines vaporview command subscriptions, and commands that are emitted.
+
+- Custom context [right click] menu items
+- Adding, removing, and selecting variables
+- Placing markers
+- Signal Value Links
+- Drag and drop into viewer (proposed API)
+
+## Internal Identifiers
+
+**Netlist ID** - This is a unique number assigned to every item in the netlist hierarchy. This number is guaranteed to be consistent for a given file, but there is no standard way of calculating this, and it is not guaranteed to be consistent between files - especially if the hierarchies have differences between them. While netlist IDs can be used to reference variables, only do so for known variables.
+
+**Row ID** - This is a unique number assigned to every netlist variable, custom variable, group item, and signal separator. These are assigned in order of what is added to the viewer. Different instances of the same variable will have different row IDs even if they have the same netlist ID. Row IDs can change.
+
+**Document ID** - This is a unique string corresponding to the document tab. It is randomly generated when a user opens a vaporview tab, and will not be consistent when a file is closed and reopened.
+
+**Only use internal identifiers when handling event emitters and right click context menus!** Netlist IDs can change when a user reloads a file, Row IDs can change when a user does an undo/redo, and Document IDs can change if a user closes and reopens a file.
+
+# Context Menus
+
+Custom context [right click] menu commands can be added to vaporview components such as the netlist viewer and and waveform viewer, and those context menu items can call commands to other extensions.
+
+## Vaporview context keys
+
+Vaporview contributes context keys for other extensions to use in [when clause](https://code.visualstudio.com/api/references/when-clause-contexts) statements.
+
+- **vaporview.activated** - Set to true when extension gets activated
+- **vaporview.documentCount** - Number of open waveform viewer tabs in the session. Initializes to undefined
+
+## Waveform Viewer Document (document webview)
+
+Custom context menu items can be added to the waveform viewer webview. All attributes listed below are usable by [when clause](https://code.visualstudio.com/api/references/when-clause-contexts) statements
+
+- **viewType:** vaporview.waveformViewer
+- **package.json path:** contributes.menus.webview/context
+- **when:** activeCustomEditorId == 'vaporview.waveformViewer'
+
+### Menu Groups
+
+- 1_default
+  - **Submenu vaporview.timeUnit**
+  - Show Ruler Lines
+  - Hide Ruler Lines
+- 1_waveform_settings
+  - **Submenu vaporview.valueFormat** - Value Format
+  - **Submenu vaporview.valueColor** - Render Type
+  - **Submenu vaporview.renderType** - Color
+- 2_variables
+  - Show In Netlist View
+  - Remove Variable
+  - Copy Name
+  - Copy Value
+- 3_groups
+  - New Group
+  - Rename Group
+- 4_saveLoad
+  - Save Viewer Session
+  - Load Viewer Session
+- 5_waveDrom
+  - **Submenu vaporview.waveDrom** -  WaveDrom
+
+### Signal Item Context - data-vscode-context
+
+All signals in the webview will emit the following context values when right clicked on. This will also be passed as an argument. The type definitions can be found in packages/vaporview-api/types.ts
+
+#### Netlist Variables
+
+Type: NetlistVariableContext
+
+- webviewSection: string = 'signal';
+- scopePath: string;
+- signalName: string;
+- type: string;
+- width: number;
+- preventDefaultContextMenuItems: boolean = true;
+- valueLinkEnable: boolean;
+- netlistId: NetlistId | undefined;
+- rowId: RowId;
+- isAnalog: boolean;
+- enum: boolean;
+
+#### Custom Variables
+
+Type: CustomVariableContext
+
+- webviewSection: string = 'signal';
+- signalName: string;
+- type: string;
+- width: number;
+- preventDefaultContextMenuItems: boolean = true;
+- rowId: RowId;
+- isAnalog: boolean;
+
+#### Signal Groups
+
+Type: SignalGroupContext
+
+- webviewSection: string = 'signal-group';
+- preventDefaultContextMenuItems: boolean = true;
+- groupId: number;
+- rowId: RowId;
+
+### Signal Separators
+
+Type: SignalSeparatorContext
+
+- webviewSection: string = 'signal-separator';
+- preventDefaultContextMenuItems: boolean = true;
+- rowId: RowId;
+
+## Netlist View
+
+Context menu items can be added to the netlist view. View IDs are listed below. Tree Item [netlist element] attributes are also outlined. However, keep in mind that for constructing a conditional menu, keep in mind that only the **contextValue** can be used for [when clause](https://code.visualstudio.com/api/references/when-clause-contexts) statements. However, when a command is called, all attributes are visible in an event object if passed into the first argument of the command handler function.
+
+See [Tree Item API docs](https://code.visualstudio.com/api/references/vscode-api#TreeItem) for details
+
+### Netlist View
+
+- **view ID:** waveformViewerNetlistView
+- **package.json path:** contributes.menus.view/item/context
+
+ie: `'when': view == 'waveformViewerNetlistView'`
+
+### Menu Groups
+
+- 1_default
+  - Add Selected
+  - Remove Selected
+  - Add all in Scope
+  - Add all in Scope (Recursive)
+  - Remove all in Scope
+  - Show in Viewer
+  - Copy Name
+- 2_addVariable
+  - Add Variable By Name
+- 3_saveLoad
+  - Save Viewer Session
+  - Load Viewer Session
+- 4_reload
+  - Reload File
+
+### Attributes:
+
+- **contextValue** - "netlistVar" | "netlistScope" - see [Tree Item API docs](https://code.visualstudio.com/api/references/vscode-api#TreeItem) and scroll down to the contextValue section.
+- **collapsibleState** - [VScode Tree Item Collapsible State](https://code.visualstudio.com/api/references/vscode-api#TreeItemCollapsibleState)
+- **children** - Child Netlist Elements
+- **iconPath** - [VScode Tree Item Icon Path](https://code.visualstudio.com/api/references/vscode-api#IconPath)
+- **tooltip** - Tooltip Text
+- **label** - [VScode Tree Item Label](https://code.visualstudio.com/api/references/vscode-api#TreeItemLabel)
+- **name** - Variable or Scope Name
+- **scopePath** - Instance path without the variable name (delimited by "." characters)
+- **type** - [Variable Type](https://docs.rs/wellen/0.14.5/wellen/enum.VarType.html) or [Scope Type](https://docs.rs/wellen/0.14.5/wellen/enum.ScopeType.html).
+- **encoding** - "BitVector" | "Real" | "String" | "none"
+- **width** - (BitVector only) Bit Width of Variable
+- **msb** - (BitVector only) Most Significant Bit
+- **lsb** - (BitVector only) Least Significant Bit
+- **numberFormat** - (BitVector only) Bit Vector Number format
+- **netlistId** - Variable ID in waveform dump file
+- **signalId** - Value Change Data index in waveform dump file
+- **fsdbVarLoaded** - FSDB only attribute
+- **scopeOffsetIdx** - FSDB only attribute
+
+# Command Inputs
+
+In an attempt to future proof and maintain compatibility with any potential future waveform viewers, most public commands will be prefixed with the "waveformViewer" prefix instead of "vaporview". Commands listed in this API may take in arguments, which will usually be an object with the arguments named. This is to maintain compatibility with any context menu items.
+
+Note that this is not an exhaustive list of input commands in Vaporview, however once the API is finalized for 1.4, these commands come with a guarantee that nothing will be removed from the schema. In other words, there will be no changes to these commands that might otherwise break another extension.
+
+## vaporview.openFile
+
+Opens a file with vaporview
+
+### Arguments: object
+
+- **uri** - Document URI
+- **loadAll** - true | false - if set to true, will load all variables into the viewport
+- **maxSignals** - abort loading all variables if netlist contains more than this number of variables. This value will be limited to 64. If this value is not specified, it will default to 64.
+
+This command takes the URI to a waveform dump file.
+
+## waveformViewer.addVariable
+
+Add a variable to the viewer. If a scope is specified, it will add all of the scope children to the viewer.
+
+### Arguments: object
+
+- **uri** - (Optional) Document URI - if not defined, this function will use the currently active, or last active document
+- **netlistId** - (Optional*) Waveform Dump File Variable ID
+- **instancePath** - (Optional*) Full instance path for variable
+- **scopePath** - (Optional*) - Variable module math without variable name
+- **name** - (Optional*) - Variable name
+- **msb** - (Optional) - Most Significant Bit
+- **lsb** - (Optional) - Least Significant Bit
+- **recursive** - (optional) - If a path to a scope is specified, it will recursively add all of the children if set to true
+- **reveal** - (Optional) - If the variable is already displayed, it will select it instead of adding another instance. Note that this only applies to netlist variables.
+
+Note that a variable must be specified with at least of the following set of keys, and priority is as follows:
+
+1. netlistId
+2. instancePath
+3. scopePath AND name
+
+## waveformViewer.removeVariable
+
+Remove a variable from the viewer
+
+### Arguments: object
+
+- **uri** - (Optional) Document URI - if not defined, this function will use the currently active, or last active document
+- **netlistId** - (Optional*) Waveform Dump File Variable ID
+- **instancePath** - (Optional*) Full instance path for variable
+- **scopePath** - (Optional*) - Variable module math without variable name
+- **name** - (Optional*) - Variable name
+- **msb** - (Optional) - Most Significant Bit
+- **lsb** - (Optional) - Least Significant Bit
+
+Note that a variable must be specified with at least of the following set of keys, and priority is as follows:
+
+1. netlistId
+2. instancePath
+3. scopePath AND name
+
+## waveformViewer.revealVariableInNetlistView
+
+Reveal a variable or scope in the netlist view
+
+### Arguments: object
+
+- **uri** - (Optional) Document URI - if not defined, this function will use the currently active, or last active document
+- **netlistId** - (Optional*) Waveform Dump File Variable ID
+- **instancePath** - (Optional*) Full instance path for variable or scope
+- **scopePath** - (Optional*) - Variable module math without target variable or scope name
+- **name** - (Optional*) - Variable or Scope name
+
+Note that a variable or scope must be specified with at least of the following set of keys, and priority is as follows:
+
+1. netlistId
+2. instancePath
+3. scopePath AND name
+
+## waveformViewer.setMarker
+
+Set the marker or alt marker to a time in the viewer
+
+### Arguments: object
+
+- **uri** - (Optional) Document URI - if not defined, this function will use the currently active, or last active document
+- **time** - Target Time
+- **units** - (Optional) Time Unit - If not specified, will default to waveform dump format time units "fs" | "ps" | "ns" | "us" | "µs" | "ms" | "s" | "ks"
+- **markerType** - (Optional) Marker Type - 0: Main Marker, 1: Alt Marker
+
+## waveformViewer.getOpenDocuments
+
+Returns a list of open waveform viewer documents
+
+### Arguments: none
+
+### Return: object
+
+Remember that to get a valid return value, all vscode commands must be called with an await keyword!
+
+- **documents** - List of URIs corresponding to open documents
+- **lastActiveDocument** - URI of last active or currently active waveform viewer document
+
+## waveformViewer.getViewerState
+
+### Return: object
+
+Returns the viewer state in the same schema as the save file
+
+### Arguments: object
+
+- **uri** - (Optional) Document URI - if not defined, this function will use the currently active, or last active document
+
+## waveformViewer.loadViewerState
+
+Loads the viewer session state from a file. If you call this command after calling `vaporview.openFile`, make sure to use an `await` when calling `vaporview.openFile` command before loading the session file.
+
+### Arguments: object
+
+- **documentUri** - (Optional) Document URI - if not defined, this function will use the currently active, or last active document
+- **sessionFileUri** - URI to session file. This is required.
+
+## waveformViewer.getValuesAtTime
+
+### Arguments: object
+
+- **uri** - (Optional) Document URI - if not defined, this function will use the currently active, or last active document
+- **time** - (optional) if not defined, will use marker time for the document
+- **instancePaths** - Array of instance path strings
+
+### Return: Array of objects
+
+- **instancePath** - Instance path string
+- **value** - Array of values length 1 or 2 [current value] or [previous value, current value]
+
+Note that if an instance path input is not found in the netlist, the result will not return a value for it.
+
+# Event Emitters
+
+Vaporview emits events when users perform actions in the viewer. If there's anything you wish to see added to this list, please comment on the [github issues](https://github.com/Lramseyer/vaporview/issues) page.
+
+All events are emitted regardless of their source action - click, key press, or external action.
+
+## onDidSetMarker
+
+Emitted when the marker changes value in the viewer. 
+
+- **uri** - uri
+- **time** - number
+- **units** - string
+
+## onDidSelectSignal
+
+Emitted when a signal is selected by either the user, or externally
+
+- **uri** - uri
+- **instancePath** - string[]
+- **netlistId** - number[]
+- **source** - "netlistView" | "viewer"
+
+## onDidAddVariable
+
+Emitted when a variable is added to the viewer
+
+- **uri** - uri
+- **instancePath** - string[]
+- **netlistId** - number[]
+
+## onDidRemoveVariable
+
+Emitted when a variable is removed from the viewer
+
+- **uri** - uri
+- **instancePath** - string[]
+- **netlistId** - number[]
+
+## onDidDropInWaveformViewer
+
+Emitted when an unknown tree item is dragged into the viewer. The resourceUriList will contain all unknown URIs of tree items. This event is only emitted if the dataTransfer contains more than one unknown URI, and all known URIs (netlist items, and eventually config files) will be filtered out of the resourceUriList to prevent erroneous events from being emitted. The event also emits the location (group path and index) of where in the viewport the item was dropped, so that if the dropped item refers to a variable item, it can be placed accordingly.
+
+- **uri** - string
+- **resourceUriList** - uri[]
+- **groupPath** - string[]
+- **index** - number
+
+## onDidClickSignalValueLink
+
+Emitted when a signal value link is clicked.
+
+- **uri**
+- **rowId** - Row ID in viewer
+- **netlistId** -  Variable ID in waveform dump file
+- **rowId** - Row ID in the viewer
+- **scopePath** - Instance path (delimited by "." characters) without the variable name
+- **signalName** - Variable or Scope Name
+- **type** - this.rowItems[netlistId].variableType,
+- **width** - BitVector Bit Width of Variable, will be 0 for Strings and Reals
+- **encoding** - "BitVector" | "Real" | "String" | "none"
+- **numberFormat** - Number format
+- **value** - Value as Bit Vector
+- **formattedValue** - Value formatted as seen in the viewer
+- **time** - Time of value change
+
+## Sample code for subscribing to event emitters
+
+This would likely go in your `activate()` function
+```typescript
+// Check if Vaporview extension is installed
+const vaporviewExtension = vscode.extensions.getExtension('lramseyer.vaporview');
+if (!vaporviewExtension) {
+  console.log('Vaporview extension not found - integration disabled');
+  return;
+}
+
+// Wait for Vaporview to activate (if not already)
+if (!vaporviewExtension.isActive) {
+  await vaporviewExtension.activate();
+}
+
+// Get the Vaporview API
+const vaporviewApi = vaporviewExtension.exports;
+if (!vaporviewApi) {
+  console.log('Vaporview API not available - onDidSelectSignal not found');
+  return;
+}
+
+// Event handler subscription
+const subscription = vaporviewApi.onDidSelectSignal(async (event: any) => {
+  const uri          = event.uri
+  const instancePath = event.instancePath;
+  const source       = event.source;
+
+  // Your handler code would go here
+});
+
+context.subscriptions.push(subscription);
+
+```
+
+# Signal Value Links
+
+Much like how VScode supports terminal and text links, Vaporview supports signal value links. An example use case would be Allowing users to link .objdump files to a program counter value for a more integrated debug experience. This was something I wanted when I first created vaporview (because I was debugging a CPU with no GDB or ETM tracing.)
+
+## How to Use
+
+Signals will have the ability to have links added to them such that when a user clicks on a value, it will emit a custom command that other extension developers can call. ~~Any command can be attached to a Signal. When that command is emitted, it will include an argument, which will be an object with the attributes listed below.~~ This will be replaced by an event emitter for onDidClickSignalValue.
+
+## waveformViewer.addSignalValueLink
+
+### Arguments: object
+  - **uri** - (Optional) Document URI - if not defined, this function will use the currently active, or last active document
+  - ~~**command** - custom command that will be called when clicked~~
+  - **valueLinkEnable** - Set to true to enable Value Links, and set to false to disable Value Links
+  - **netlistId** - (Optional*) Waveform Dump File Variable ID - note that this will be emitted by the context menu command, so developers will have this value
+  - **instancePath** - (Optional*) Full instance path for variable
+  - **scopePath** - (Optional*) - Variable module math without variable name
+  - **name** - (Optional*) - Variable name
+  - **msb** - (Optional) - Most Significant Bit
+  - **lsb** - (Optional) - Least Significant Bit
+
+Note that a variable must be specified with at least of the following set of keys, and priority is as follows:
+
+1. netlistId
+2. instancePath
+3. scopePath AND name
+
+## Sample code
+
+package.json
+```json
+"contributes": {
+  "menus": {
+    ...
+    "webview/context": [
+      ...
+      {
+        "command": "myExtension.addLinkForValues",
+        "when": "viewItem == 'netlistVar'",
+        "group": "0_links"
+      },
+      ...
+    ]
+  },
+  ...
+  {
+    "commands": [
+      {
+        "command": "myExtension.addLinkForValues",
+        "Title": "Link Signal Values"
+      }
+    ]
+  }
+}
+```
+
+extension.ts
+```TypeScript
+// Register command for the context menu item
+const disposable_1 = vscode.commands.registerCommand(
+  'myExtension.addLinkForValues', 
+  (e) => {
+    const args = {
+      netlistId: e.netlistId
+    }
+    vscode.commands.executeCommand('waveformViewer.addSignalValueLink', args);
+  }
+);
+
+// Handle event emitter
+// See examples above on how to handle events from other extensions
+```
+
+# Vaporview URI schema (proposal)
+
+Vaporview will start supporting URIs to navigate within the viewer. It will use the scheme **waveform** to denote that it is a waveform document. Much like how VScode supports fragments to select lines and ranges of lines, vaporview schemes will support time values, time ranges, and instance paths of signals. All tree items in the netlist view will contain their respective URIs as the resourceUri field, and support drag and drop. This way, if you want your extension to support dragging and dropping netlist items, you can.
+
+The **fragment** of the URI can contain an instance path, time value, or time range, and will be delimited by an "&"
+
+**Time** and **Time ranges** will be encoded as **t:5000** or **t:4000ns** (units are optional) for a time range, use a dash to delimit
+
+**Instance Path** is encoded as **net:top.scope.signal**
+
+# Save File Format (Proposal)
+
+Note tha this is a proposal, which does not reflect the actual file format. I plan to coordinate with the Surfer team to standardize on a format, and this outlines the things I would want for vaporview.
+
+## Window Configuration
+
+- Nested set of dividers
+
+## Marker placement
+
+- Main Marker
+- Alt Marker
+
+## Displayed signals
+
+- Item type - Signal | Group | Transaction | Other?
+
+## Item Type: Signal
+- Type - Signal
+- Instance Path
+- Number Format - ie hex, decimal, binary
+- Text justify - Left | right | center
+- Render type - binary | multi-bit | linear | stepped | etc
+- Pin location - top | bottom
+- Color (preferably an index to adapt to color themes)
+- Background Color
+- Value Link Command
+
+## Item Type: Group
+- Type - Group
+- Array of items
+
+## Item Type Transaction
+- Type - Transaction
+- Transaction Type
+- Arguments - Array of Signals

@@ -1,0 +1,4 @@
+{
+  // (its own design, relative to this folder)
+  "vaporview.trace.designArgs": ["-f", "a.f"]
+}

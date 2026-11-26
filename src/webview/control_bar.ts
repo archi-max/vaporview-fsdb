@@ -1,0 +1,455 @@
+import { EnumQueueEntry, SignalId, type RowId, StateChangeType } from '../common/types';
+import { ActionType, type EventHandler } from './event_handler';
+import { vscodeWrapper, viewerState, viewport, rowHandler, config, windowCache} from './vaporview'; // cmux: windowed loading
+import { CustomVariable, NetlistVariable } from './signal_item';
+
+enum ButtonState {
+  Disabled = 0,
+  Enabled  = 1,
+  Selected = 2
+}
+
+enum SearchState {
+  Time  = 0,
+  Value = 1
+}
+
+enum SelectedSignalWidth {
+  None       = 0,
+  SingleBit  = 1,
+  MultiBit   = 2
+}
+
+export class ControlBar {
+  private zoomInButton: HTMLElement;
+  private zoomOutButton: HTMLElement;
+  private zoomFitButton: HTMLElement;
+  private prevNegedge: HTMLElement;
+  private prevPosedge: HTMLElement;
+  private nextNegedge: HTMLElement;
+  private nextPosedge: HTMLElement;
+  private prevEdge: HTMLElement;
+  private nextEdge: HTMLElement;
+  private timeEquals: HTMLElement;
+  private valueEquals: HTMLElement;
+  private valueEqualsSymbol: HTMLElement;
+  private previousButton: HTMLElement;
+  private nextButton: HTMLElement;
+  private autoScroll: HTMLElement;
+  private touchScroll: HTMLElement;
+  private mouseScroll: HTMLElement;
+  private autoReload: HTMLInputElement;
+  settings: HTMLElement;
+
+  private searchContainer: HTMLElement;
+  private searchBar: HTMLInputElement;
+  private valueIconRef: HTMLElement;
+
+  // Search handler variables
+  searchState         = SearchState.Time;
+  searchInFocus       = false;
+
+  private events: EventHandler;
+
+  parsedSearchValue: string | null = null;
+  rawSearchValue: string | null = null; // cmux: the text parsedSearchValue was parsed from
+
+  constructor(events: EventHandler) {
+    this.events = events;
+
+    this.zoomInButton  = document.getElementById('zoom-in-button')!;
+    this.zoomOutButton = document.getElementById('zoom-out-button')!;
+    this.zoomFitButton = document.getElementById('zoom-fit-button')!;
+    this.prevNegedge   = document.getElementById('previous-negedge-button')!;
+    this.prevPosedge   = document.getElementById('previous-posedge-button')!;
+    this.nextNegedge   = document.getElementById('next-negedge-button')!;
+    this.nextPosedge   = document.getElementById('next-posedge-button')!;
+    this.prevEdge      = document.getElementById('previous-edge-button')!;
+    this.nextEdge      = document.getElementById('next-edge-button')!;
+    this.timeEquals    = document.getElementById('time-equals-button')!;
+    this.valueEquals   = document.getElementById('value-equals-button')!;
+    this.valueEqualsSymbol = document.getElementById('search-symbol')!;
+    this.previousButton = document.getElementById('previous-button')!;
+    this.nextButton    = document.getElementById('next-button')!;
+    this.autoScroll    = document.getElementById('auto-scroll-button')!;
+    this.touchScroll   = document.getElementById('touchpad-scroll-button')!;
+    this.mouseScroll   = document.getElementById('mouse-scroll-button')!;
+    this.autoReload    = document.getElementById('autoReload') as HTMLInputElement;
+    this.settings      = document.getElementById('settings-menu')!;
+    this.searchContainer = document.getElementById('search-container')!;
+    this.searchBar     = document.getElementById('search-bar') as HTMLInputElement;
+    this.valueIconRef  = document.getElementById('value-icon-reference')!;
+
+    if (this.zoomInButton === null || this.zoomOutButton === null || this.zoomFitButton === null || 
+        this.prevNegedge === null || this.prevPosedge === null || this.nextNegedge === null || 
+        this.nextPosedge === null || this.prevEdge === null || this.nextEdge === null || 
+        this.timeEquals === null || this.valueEquals === null || this.previousButton === null || 
+        this.nextButton === null || this.touchScroll === null || this.mouseScroll === null || 
+        this.autoScroll === null || this.searchContainer === null || this.searchBar === null || 
+        this.valueIconRef === null ||  this.valueEqualsSymbol === null || this.autoReload === null) {
+      throw new Error("Could not find all required elements");
+    }
+
+    // Control bar button event handlers
+    this.zoomInButton.addEventListener( 'click', () => {viewport.handleZoom(-1, (viewport.pseudoScrollLeft + viewport.halfViewerWidth) / viewport.zoomRatio, viewport.halfViewerWidth);});
+    this.zoomOutButton.addEventListener('click', () => {viewport.handleZoom(1, (viewport.pseudoScrollLeft + viewport.halfViewerWidth) / viewport.zoomRatio, viewport.halfViewerWidth);});
+    this.zoomFitButton.addEventListener('click', () => {viewport.animateZoomRange(0, viewport.timeStop);});
+    this.prevNegedge.addEventListener(  'click', () => {this.goToNextTransition(0, -1, ['0']);});
+    this.prevPosedge.addEventListener(  'click', () => {this.goToNextTransition(0, -1, ['1']);});
+    this.nextNegedge.addEventListener(  'click', () => {this.goToNextTransition(0,  1, ['0']);});
+    this.nextPosedge.addEventListener(  'click', () => {this.goToNextTransition(0,  1, ['1']);});
+    this.prevEdge.addEventListener(     'click', () => {this.goToNextTransition(0, -1, []);});
+    this.nextEdge.addEventListener(     'click', () => {this.goToNextTransition(0,  1, []);});
+    this.autoReload.addEventListener(  'change', (e: Event) => {this.handleAutoReloadCheckbox(e);});
+
+    // Search bar event handlers
+    this.searchBar.addEventListener(     'focus', () => {this.handleSearchBarInFocus(true);});
+    this.searchBar.addEventListener(      'blur', () => {this.handleSearchBarInFocus(false);});
+    this.searchBar.addEventListener(   'keydown', (e: KeyboardEvent) => {this.handleSearchBarKeyDown(e);});
+    this.searchBar.addEventListener(     'keyup', (e: KeyboardEvent) => {this.handleSearchBarEntry(e);});
+    this.timeEquals.addEventListener(    'click', () => {this.handleSearchButtonSelect(0);});
+    this.valueEquals.addEventListener(   'click', () => {this.handleSearchButtonSelect(1);});
+    this.previousButton.addEventListener('click', () => {this.handleSearchGoTo(-1);});
+    this.nextButton.addEventListener(    'click', () => {this.handleSearchGoTo(1);});
+  
+    // Scroll Type settings
+    this.autoScroll.addEventListener(    'click', () => {this.handleScrollModeClick("Auto");});
+    this.touchScroll.addEventListener(   'click', () => {this.handleScrollModeClick("Touchpad");});
+    this.mouseScroll.addEventListener(   'click', () => {this.handleScrollModeClick("Mouse");});
+
+    // Settings menu
+    this.settings.addEventListener(      'click', (e: MouseEvent) => {this.clickSettings(e);});
+
+    this.setButtonState(this.previousButton, ButtonState.Disabled);
+    this.setButtonState(this.mouseScroll, ButtonState.Selected);
+    this.updateNextEdgeButtons([]);
+
+    this.handleSignalSelect = this.handleSignalSelect.bind(this);
+    this.handleRedrawVariable = this.handleRedrawVariable.bind(this);
+    this.handleMarkerSet = this.handleMarkerSet.bind(this);
+
+    this.events.subscribe(ActionType.SignalSelect, this.handleSignalSelect);
+    this.events.subscribe(ActionType.RedrawVariable, this.handleRedrawVariable);
+    this.events.subscribe(ActionType.MarkerSet, this.handleMarkerSet);
+  }
+
+  goToNextTransition(markerType: number, direction: number, edge: string[]) {
+    //console.log("Go to next transition: " + direction + ' ' + edge);
+    let nearestTime = markerType === 0 ? viewerState.markerTime : viewerState.altMarkerTime;
+    if (nearestTime === null) {return;}
+    if (viewerState.selectedSignal.length === 0) {return;}
+    // cmux: windowed rows answer from loaded windows or ask the host (async)
+    if (windowCache.enabled) {windowCache.goToNextTransition(markerType, direction, edge); return;}
+
+    const nextTransitionTime: number[] = [];
+    viewerState.selectedSignal.forEach((rowId) => {
+      if (nearestTime === null) {return;}
+      const data  = rowHandler.rowItems[rowId];
+      const time  = data.getNextEdge(nearestTime, direction, edge);
+      if (time === null) {return;}
+      nextTransitionTime.push(time);
+    });
+
+    if (nextTransitionTime.length === 0) {return;}
+
+    if (direction === 1) {
+      nearestTime = Math.min(...nextTransitionTime);
+    } else {
+      nearestTime = Math.max(...nextTransitionTime);
+    }
+
+    this.events.markerSet(nearestTime, markerType, false);
+    //console.log('goToNextTransition');
+    vscodeWrapper.sendWebviewContext(StateChangeType.User);
+  }
+
+  handleScrollModeClick(mode: string) {
+    vscodeWrapper.updateConfiguration("scrollingMode", mode);
+  }
+
+  setScrollMode(mode: string) {
+    switch (mode) {
+      case 'Mouse':    this.handleTouchScroll(false); break;
+      case 'Touchpad': this.handleTouchScroll(true);  break;
+      case 'Auto':     this.handleAutoScroll();       break;
+    }
+  }
+
+  handleTouchScroll(state: boolean) {
+    config.touchpadScrolling = state;
+    config.autoTouchpadScrolling = false;
+    if (state) {
+      this.setButtonState(this.mouseScroll, ButtonState.Enabled);
+      this.setButtonState(this.touchScroll, ButtonState.Selected);
+    } else {
+      this.setButtonState(this.mouseScroll, ButtonState.Selected);
+      this.setButtonState(this.touchScroll, ButtonState.Enabled);
+    }
+    this.setButtonState(this.autoScroll, ButtonState.Enabled);
+  }
+
+  handleAutoScroll() {
+    config.autoTouchpadScrolling = true;
+    this.setButtonState(this.mouseScroll, ButtonState.Enabled);
+    this.setButtonState(this.touchScroll, ButtonState.Enabled);
+    this.setButtonState(this.autoScroll, ButtonState.Selected);
+  }
+
+  clickSettings(e: MouseEvent) {
+    e.preventDefault();
+    (e.target as HTMLElement).dispatchEvent(
+      new MouseEvent("contextmenu", { bubbles: true, clientX: e.clientX, clientY: e.clientY })
+    );
+    e.stopPropagation();
+  }
+
+  setButtonState(buttonId: HTMLElement, state: number) {
+    if (state === ButtonState.Disabled) {
+      buttonId.classList.remove('selected-button');
+      buttonId.classList.add('disabled-button');
+    } else if (state === ButtonState.Enabled) {
+      buttonId.classList.remove('disabled-button');
+      buttonId.classList.remove('selected-button');
+    } else if (state === ButtonState.Selected) {
+      buttonId.classList.remove('disabled-button');
+      buttonId.classList.add('selected-button');
+    }
+  }
+
+  setBinaryEdgeButtons(selectable: number) {
+    this.setButtonState(this.prevNegedge, selectable);
+    this.setButtonState(this.prevPosedge, selectable);
+    this.setButtonState(this.nextNegedge, selectable);
+    this.setButtonState(this.nextPosedge, selectable);
+  }
+
+  setBusEdgeButtons(selectable: number) {
+    this.setButtonState(this.prevEdge, selectable);
+    this.setButtonState(this.nextEdge, selectable);
+  }
+
+  updateNextEdgeButtons(rowIdList: RowId[]) {
+
+    const width = this.getSelectedSignalWidths(rowIdList);
+
+    if (width === SelectedSignalWidth.None) {
+      this.setBinaryEdgeButtons(ButtonState.Disabled);
+      this.setBusEdgeButtons(ButtonState.Disabled);
+    } else if (width === SelectedSignalWidth.SingleBit) {
+      this.setBinaryEdgeButtons(ButtonState.Enabled);
+      this.setBusEdgeButtons(ButtonState.Enabled);
+    } else {
+      this.setBinaryEdgeButtons(ButtonState.Disabled);
+      this.setBusEdgeButtons(ButtonState.Enabled);
+    }
+  }
+
+  getSelectedSignalWidths(rowIdList: RowId[]) {
+    let result = SelectedSignalWidth.None;
+    const isSingleBit: boolean[] = [];
+    rowIdList.forEach((rowId) => {
+      const signalItem = rowHandler.rowItems[rowId];
+      if (!(signalItem instanceof NetlistVariable) && !(signalItem instanceof CustomVariable)) {return;}
+      isSingleBit.push(signalItem.signalWidth === 1);
+    });
+    const allSingleBit = isSingleBit.reduce((prev, curr) => {return prev && curr;}, true);
+
+    if (allSingleBit && isSingleBit.length > 0) {
+      result = SelectedSignalWidth.SingleBit;
+    } else if (isSingleBit.length > 0) {
+      result = SelectedSignalWidth.MultiBit;
+    }
+    return result;
+  }
+
+  defocusSearchBar() {
+    this.searchBar.selectionStart = 0;
+    this.searchBar.selectionEnd   = 0;
+    this.searchBar.blur();
+  }
+
+  handleSearchButtonSelect(button: number) {
+    this.handleSearchBarInFocus(true);
+    this.searchState = button;
+    if (this.searchState === SearchState.Time) {
+      this.setButtonState(this.timeEquals, ButtonState.Selected);
+      this.setButtonState(this.valueEquals, ButtonState.Enabled);
+    } else if (this.searchState === SearchState.Value) {
+      this.setButtonState(this.timeEquals, ButtonState.Enabled);
+      this.setButtonState(this.valueEquals, ButtonState.Selected);
+    }
+    this.handleSearchBarEntry({key: 'none'});
+  }
+
+  checkValidTimeString(inputText: string) {
+    if (inputText.match(/^[0-9]+$/)) {
+      this.parsedSearchValue = inputText.replace(/,/g, '');
+      return true;
+    }
+    else {return false;}
+  }
+
+  handleSearchBarKeyDown(event: KeyboardEvent) {
+    if (event.key === 'Escape' && windowCache.cancelNav()) {event.preventDefault(); return;} // cmux: the search bar keeps focus during a value search
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      this.handleSearchGoTo(1);
+      return;
+    }
+  }
+  
+  handleSearchBarEntry(event: KeyboardEvent | { key: string }) {
+    const inputText  = this.searchBar.value;
+    let inputValid   = true;
+    //console.log(viewerState.selectedSignal);
+    //console.log(this.searchState);
+    if (viewerState.selectedSignal.length === 1) {
+      const rowId  = viewerState.selectedSignal[0];
+      const rowItem = rowHandler.rowItems[rowId];
+      if (rowItem instanceof NetlistVariable || rowItem instanceof CustomVariable) {
+        const format = rowItem.valueFormat;
+        const checkValidSearch = format.checkValidSearch;
+        const parseValue = format.parseSearchValue;
+
+        // check to see that the input is valid
+        if (this.searchState === SearchState.Time) {
+          inputValid = this.checkValidTimeString(inputText);
+        } else if (this.searchState === SearchState.Value) {
+          inputValid = checkValidSearch(inputText);
+          if (inputValid) {this.parsedSearchValue = parseValue(inputText); this.rawSearchValue = inputText;}
+          //console.log(inputValid);
+          //console.log(this.parsedSearchValue);
+        }
+      }
+    }
+  
+    // Update UI accordingly
+    if (inputValid || inputText === '') {
+      this.searchContainer.classList.remove('is-invalid');
+    } else {
+      this.searchContainer.classList.add('is-invalid');
+    }
+  
+    if (inputValid && inputText !== '') {
+      this.setButtonState(this.previousButton, this.searchState);
+      this.setButtonState(this.nextButton, ButtonState.Enabled);
+    } else {
+      this.setButtonState(this.previousButton, ButtonState.Disabled);
+      this.setButtonState(this.nextButton, ButtonState.Disabled);
+    }
+  }
+  
+  handleSearchGoTo(direction: number) {
+    if (viewerState.selectedSignal.length !== 1) {return;}
+    if (this.parsedSearchValue === null) {return;}
+    let startTime = viewerState.markerTime;
+    let updateState = false;
+    if (startTime === null) {startTime = 0;}
+  
+    const rowId  = viewerState.selectedSignal[0];
+    const rowItem = rowHandler.rowItems[rowId];
+    if (rowItem === undefined || !(rowItem instanceof NetlistVariable) && !(rowItem instanceof CustomVariable)) {return;}
+    // cmux: windowed rows search loaded windows, then the host
+    if (rowItem instanceof NetlistVariable && windowCache.isWindowed(rowItem.signalId)) {
+      if (this.searchState !== SearchState.Time) {windowCache.searchValue(rowItem, this.parsedSearchValue, direction, rowItem.valueFormat.id === 'signed' && this.searchBar.value.trim().startsWith('-'), this.rawSearchValue ?? undefined);}
+      else if (direction === 1) {this.events.markerSet(parseInt(this.parsedSearchValue), 0, false); vscodeWrapper.sendWebviewContext(StateChangeType.User);}
+      return;
+    }
+    const data = rowItem.getWaveformData();
+    if (data === undefined) {return;}
+    const format   = rowItem.valueFormat;
+    const checkSearchValue = format.checkSearchValue;
+  
+    if (this.searchState === SearchState.Time && direction === 1) {
+      this.events.markerSet(parseInt(this.parsedSearchValue), 0, false);
+      updateState = true;
+    } else {
+      const signalWidth     = data.signalWidth;
+      //if (this.parsedSearchValue.length > signalWidth) {trimmedSearchValue = this.parsedSearchValue.slice(-1 * signalWidth);}
+
+      const valueChangeData = data.valueChangeData;
+      const formattedData   = data.formattedValues;
+      if (!formattedData[format.id]) {return;}
+      // vscode-port: a long signal's format cache fills in slices (row_handler.updateValueFormatCache); until it is
+      // complete, the values the search scans are formatted here, so a search right after a load finds its match.
+      const fd = formattedData[format.id];
+      const cached = fd.formatCached && fd.values ? fd.values : null;
+      const formattedValues = cached ?? new Proxy([] as string[], {get: (_t, k) => {
+        const i = typeof k === 'string' ? Number(k) : NaN;
+        if (!Number.isInteger(i) || i < 0 || i >= valueChangeData.length) {return undefined;}
+        const v = valueChangeData[i][1];
+        return format.formatString(v, signalWidth, !format.is9State(v));
+      }});
+      const timeIndex = data.valueChangeData.findIndex(([t, v]) => {return t >= startTime;});
+      let indexOffset = 0;
+  
+      if (direction === -1) {indexOffset = -1;}
+      else if (viewerState.markerTime === valueChangeData[timeIndex][0]) {indexOffset = 1;}
+  
+      for (let i = timeIndex + indexOffset; i >= 0; i+=direction) {
+        if (checkSearchValue(this.parsedSearchValue, valueChangeData[i][1], formattedValues[i])) {
+          this.events.markerSet(valueChangeData[i][0], 0, false);
+          updateState = true;
+          break;
+        }
+      }
+    }
+    if (updateState) {
+      //console.log('handleSearchGoTo');
+      vscodeWrapper.sendWebviewContext(StateChangeType.User);
+    }
+  }
+
+  setAutoReload(state: boolean) {
+    viewerState.autoReload  = state;
+    this.autoReload.checked = state;
+  }
+
+  handleAutoReloadCheckbox(event: Event) {
+    viewerState.autoReload = (event.target as HTMLInputElement).checked;
+    vscodeWrapper.sendWebviewContext(StateChangeType.None);
+  }
+
+  handleSearchBarInFocus(isFocused: boolean) {
+    this.searchInFocus = isFocused;
+    if (isFocused) {
+      if (document.activeElement !== this.searchBar) {
+        this.searchBar.focus();
+      }
+      if (this.searchContainer.classList.contains('is-focused')) {return;}
+      this.searchContainer.classList.add('is-focused');
+      this.handleSearchBarEntry({key: 'none'});
+    } else {
+      this.searchContainer.classList.remove('is-focused');
+    }
+  }
+
+  handleSignalSelect(rowIdList: RowId[], lastSelected: RowId | null = null) {
+
+    this.updateNextEdgeButtons(rowIdList);
+
+    if (rowIdList.length !== 1) {return;}
+    const signalItem = rowHandler.rowItems[rowIdList[0]];
+    if (signalItem && (signalItem instanceof NetlistVariable || signalItem instanceof CustomVariable)) {
+      this.valueEqualsSymbol.textContent = signalItem.valueFormat.symbolText;
+    }
+  }
+
+  handleRedrawVariable(rowId: RowId) {
+    const rowItem = rowHandler.rowItems[rowId];
+    if (!(rowItem instanceof NetlistVariable) && !(rowItem instanceof CustomVariable)) {return;}
+    if (rowId === viewerState.selectedSignal[0]) {
+      this.valueEqualsSymbol.textContent = rowItem.valueFormat.symbolText;
+    }
+  }
+
+  handleMarkerSet(time: number, markerType: number, dragging: boolean) {
+    if (dragging) {return;}
+    if (this.searchState === SearchState.Time) {
+      // vscode-port: a session saved with no marker restores markerTime null; String(null) showed "null"
+      this.searchBar.value = (time === null || time === undefined || !Number.isFinite(time)) ? '' : String(time);
+      this.searchContainer.classList.remove('is-invalid');
+    }
+  }
+
+}

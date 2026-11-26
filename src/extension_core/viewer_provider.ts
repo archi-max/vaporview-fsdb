@@ -1,0 +1,1705 @@
+import * as vscode from 'vscode';
+import { type DocumentId, type NetlistId, SignalGroupWebviewContext, SignalId, StateChangeType, WindowMessageType, type MarkerSetEvent, type SignalEvent, type ViewerDropEvent, ExternalKeyDownMessage, SetDisplayFormatMessage, EmitEventMessage, WebviewDropMessage, DisplayFormatProperties, WebviewStateEvent } from '../common/types';
+import { decodeNetlistUri } from '../../packages/vaporview-api';
+import type { VariableActionArgs, VariableAction, SetMarkerArgs, AddVariableByPathArgs, SavedRowItem, LoadViewerStateArgs, OpenFileArgs, ValueLinkEvent, RulerContext, RulerWebviewContext } from '../../packages/vaporview-api/types';
+import { scaleFromUnits, logScaleFromUnits } from '../common/functions';
+import * as fs from 'fs';
+import { } from './extension';
+import { VaporviewDocument, NetlistSearchQuickPick, type WaveformFileParser, type WebviewSession } from './document';
+import { WasmFormatHandler } from './wasm_handler';
+import { FsdbFormatHandler } from './fsdb_handler';
+import { SurferFormatHandler } from './surfer_handler';
+import { WispFormatHandler, failedOpenPages } from '../cmux/wisp/wisp_handler'; // vscode-port: FSDB/WCZ through wisp-helper
+import { setTraceDumpSource } from '../cmux/trace/source'; // vscode-port: tracing on FSDB/WCZ
+import { WispTraceSource } from '../cmux/trace/wisp_source';
+import { NetlistTreeDataProvider, type NetlistItem, netlistItemDragAndDropController, VaporviewStatusBar } from './tree_view';
+import path from 'path';
+import { e2eResolve } from './e2e/hook'; // vscode-port
+import { handleBridgeMessage, injectCmuxScripts } from '../cmux/bridge_host'; // vscode-port: cmux page modules
+import { dirname } from 'path';
+
+// vscode-shiki-bridge is ESM-only, but esbuild aliases it to dist/index.cjs
+// (see esbuild.js). A static import fails TS module resolution, and a dynamic
+// import() bypasses the alias, so require() through the alias is the only path.
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { getUserTheme } = require('vscode-shiki-bridge');
+
+// #region Local type definitions
+
+interface ThemeRule {
+  settings?: { foreground?: string };
+  scope?: string | string[];
+}
+
+interface ThemeEntry {
+  settings?: ThemeRule[];
+}
+
+type UserTheme = [themeName: string, themeData: ThemeEntry[]];
+
+interface WebviewMessageEvent {
+  messageType: WindowMessageType;
+  message: string;
+}
+
+interface WebviewResponseMessage {
+  requestId: number;
+  body: unknown;
+}
+
+interface AddItemsArgs {
+  recursive?: boolean;
+  items: string[];
+}
+
+export interface RenameSignalGroupArgs {
+  groupId?: number;
+  name?: string;
+  rowId?: number;
+}
+
+// #endregion
+
+export interface VaporviewDocumentDelegate {
+  addSignalByNameToDocument(signalName: string): void;
+  logOutputChannel(message: string): void;
+  updateViews(uri: vscode.Uri): void;
+  emitEvent(e: EmitEventMessage): void;
+  removeFromCollection(uri: vscode.Uri, document: VaporviewDocument): void;
+  getColorPalette(): {colorPalette: string[], errorColorPalette: string[], themeValid: boolean};
+}
+
+class VaporviewDocumentBackup implements vscode.CustomDocumentBackup {
+  constructor(public readonly id: string) {}
+  delete(): void {return;}
+}
+
+// vscode-port: what a failed open leaves in its tab
+function failedDocument(uri: vscode.Uri, openError: string): vscode.CustomDocument & {openError: string} {
+  return {uri, openError, dispose: () => {}};
+}
+function failedOpenHtml(uri: vscode.Uri, message: string): string {
+  const esc = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const setting = /vaporview\.wisp\.planBudgetMB/.test(message)
+    ? `<p><a id="open-setting" href="command:workbench.action.openSettings?${encodeURIComponent(JSON.stringify(['vaporview.wisp.planBudgetMB']))}">Open the vaporview.wisp.planBudgetMB setting</a>, raise it, then Retry.</p>`
+    : '';
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline';">
+<style>body{font-family:var(--vscode-font-family);color:var(--vscode-foreground);padding:16px 24px;max-width:60em}
+h2{color:var(--vscode-errorForeground);font-weight:600}code{word-break:break-all}</style></head>
+<body data-vv-open-error="1"><h2>This waveform could not be opened</h2><p><code>${esc(uri.fsPath)}</code></p><p id="open-error">${esc(message)}</p>${setting}
+<p><a id="retry-open" href="command:vaporview.wisp.retryOpen?${encodeURIComponent(JSON.stringify([uri.toString()]))}">Retry</a>: close this tab and open the file again.</p></body></html>`;
+}
+
+export class VaporviewDocumentCollection {
+
+  private readonly _documents: Record<DocumentId, VaporviewDocument> = {};
+  private _numDocuments = 0;
+  public get numDocuments() {return this._numDocuments;}
+
+  // Color palette
+  public colorPalette: string[] = [];
+  public errorColorPalette: string[] = [];
+  public themeValid: boolean = false;
+
+
+  constructor(
+    private readonly log: vscode.OutputChannel,
+  ) {
+    this.getTokenColorsForTheme();
+  }
+
+  private randomString() {return Math.random().toString(36).substring(2, 15);}
+
+  public createUniqueDocumentId(): DocumentId {
+    let documentId = this.randomString();
+    while (this._documents[documentId]) {
+      documentId = this.randomString();
+    }
+    return documentId;
+  }
+
+  public add(documentId: DocumentId, document: VaporviewDocument) {
+    this._documents[documentId] = document;
+    this._numDocuments++;
+    vscode.commands.executeCommand('setContext', 'vaporview.documentCount', this._numDocuments);
+  }
+
+  public get(documentId: DocumentId): VaporviewDocument | undefined {
+    return this._documents[documentId];
+  }
+
+  public remove(documentId: DocumentId) {
+    delete this._documents[documentId];
+    this._numDocuments--;
+    vscode.commands.executeCommand('setContext', 'vaporview.documentCount', this._numDocuments);
+  }
+
+  public getDocumentFromUri(uri: string): VaporviewDocument | undefined {
+    for (const documentId in this._documents) {
+      if (this._documents[documentId].uri.toString() === uri) {
+        return this._documents[documentId];
+      }
+    }
+    return undefined;
+  }
+
+  public getAllDocuments() {
+    return Object.keys(this._documents).map(documentId => {
+      return {
+        documentId: documentId,
+        uri: this._documents[documentId].uri
+      };
+    });
+  }
+
+  public broadcast(callback: (document: VaporviewDocument) => void) {
+    for (const documentId in this._documents) {
+      const document = this._documents[documentId];
+      if (document) {
+        callback(document);
+      }
+    }
+  }
+
+  updateConfiguration(_e: vscode.ConfigurationChangeEvent) {
+    this.broadcast((document) => {
+      document.setConfigurationSettings();
+    });
+  }
+
+  // Build a color palette from the current theme
+  // Step 1: Get the color theme and settings
+  //      A: Try reading the user's theme by vscode-shiki-bridge
+  //      B: Try using the 'shiki.getUserTheme' command
+  // Step 2: create a set of unique colors
+  // Step 3: Use a commonly used scope list to map the colors to a color palette
+  //         The scope list has an established order, so we can use it to build a
+  //         color palette in that order.
+  // Step 4: De-duplicate the colors built from the common scope list.
+  //         If a the palette is full, then we can stop. If it's not, then we can
+  //         select from the remaining colors in the unique color set.
+  async getTokenColorsForTheme() {
+    const theme: UserTheme | undefined = await this.fetchUserTheme();
+
+    if (theme) {
+      const [_themeName, themeData] = theme;
+      this.processThemeRules(themeData);
+    } else {
+      vscode.window.showErrorMessage(
+        "Error getting user theme. If you are seeing this while using " +
+        "VS Code SSH, you will need to use this helper extension: " +
+        "https://github.com/Lramseyer/shiki-service"
+      );
+      this.setDefaultThemeRules();
+    }
+
+    this.broadcast((document) => {
+      document.webviewPanel?.webview.postMessage({
+        command: 'updateColorPalette',
+        colorPalette: this.colorPalette,
+        errorColorPalette: this.errorColorPalette,
+        themeValid: this.themeValid,
+      });
+    });
+  }
+
+  // Try each theme source in order; return undefined if all fail.
+  // Note: `return await` is required so rejections are caught by each try.
+  private async fetchUserTheme(): Promise<UserTheme | undefined> {
+    // A: vscode-shiki-bridge
+    try {return await getUserTheme() as UserTheme;}
+    catch { /* fall through to B */ }
+
+    // B: 'shiki.getUserTheme' command (helper extension, e.g. for VS Code SSH)
+    try {return await vscode.commands.executeCommand<UserTheme>('shiki.getUserTheme');}
+    catch {return undefined;}
+  }
+
+  setDefaultThemeRules() {
+    this.colorPalette = ['#CCCCCC', '#CCCCCC', '#CCCCCC', '#CCCCCC', '#CCCCCC', '#CCCCCC', '#CCCCCC', '#CCCCCC'];
+    this.errorColorPalette = ['#C00000'];
+    this.themeValid = false;
+  }
+
+  processThemeRules(themeData: ThemeEntry[]) {
+    const scopeList = [
+      "constant.numeric",
+      "string",
+      "keyword", "constant.language", "storage.type",
+      "keyword.control",
+      "variable",
+      "entity.name.function", "support.function",
+      "entity.name.type", "support.type",
+      "comment",
+      "keyword.operator",
+      "variable.parameter"
+    ];
+    const errorScopes = ["token.error-token", "invalid"];
+    const colorMap: Record<string, string[]> = {};
+    const scopeMap: Record<string, string[]> = {};
+    const colorPalette: string[] = [];
+    const errorColorPalette: string[] = [];
+    scopeList.forEach((scope: string) => {scopeMap[scope] = [];});
+    errorScopes.forEach((scope: string) => {scopeMap[scope] = [];});
+    themeData.forEach((theme: ThemeEntry) => {
+      const settings = theme.settings;
+      if (!settings) {return;}
+
+      settings.forEach((rule: ThemeRule) => {
+        if (!rule.settings?.foreground) {return;}
+        const color = rule.settings.foreground.toLowerCase();
+        if (!colorMap[color]) {
+          colorMap[color] = [];
+        }
+
+        let rulesList: string[] = [];
+        if (typeof rule.scope === "string") {
+          rulesList = [rule.scope];
+        } else if (rule.scope instanceof Array) {
+          rulesList = rule.scope;
+        }
+
+        rulesList.forEach((scope: string) => {
+          colorMap[color].push(scope);
+          if (scopeList.includes(scope)) {
+            scopeMap[scope].push(color);
+          }
+          if (errorScopes.includes(scope)) {
+            errorColorPalette.push(color);
+          }
+        });
+      });
+    });
+
+    const semanticTokens = Object.keys(colorMap);
+    errorScopes.forEach((scope: string) => {
+      scopeMap[scope].forEach((color: string) => {
+        if (errorColorPalette.includes(color)) {return;}
+        errorColorPalette.push(color);
+      });
+    });
+
+    scopeList.forEach((scope: string) => {
+      scopeMap[scope].forEach((color: string) => {
+        if (colorPalette.includes(color)) {return;}
+        if (errorColorPalette.includes(color)) {return;}
+        colorPalette.push(color);
+      });
+    });
+
+    semanticTokens.forEach((color: string) => {
+      if (colorPalette.includes(color)) {return;}
+      if (errorColorPalette.includes(color)) {return;}
+      colorPalette.push(color);
+    });
+
+    this.log.appendLine("Color palette from semantic token colors: " + colorPalette.join(", ") + ", " + errorColorPalette.join(", "));
+
+    this.colorPalette = colorPalette;
+    this.errorColorPalette = errorColorPalette;
+    this.themeValid = true;
+  }
+
+  getColorPalette() {
+    return {
+      colorPalette: this.colorPalette,
+      errorColorPalette: this.errorColorPalette,
+      themeValid: this.themeValid
+    };
+  }
+}
+
+// #region WaveformViewerProvider
+// vscode-port: coalesced single adds (see beginAdd)
+interface AddQueue { slots: (NetlistId | null)[]; inFlight: number; firstAt: number; lastAt: number; gap: number; timer: ReturnType<typeof setTimeout> | undefined }
+const ADD_QUIET_MS = 8, ADD_QUIET_MAX_MS = 50, ADD_MAX_WAIT_MS = 250;
+
+export class WaveformViewerProvider implements vscode.CustomEditorProvider<VaporviewDocument> {
+
+  private static readonly viewType = 'vaporview.waveformViewer';
+  public themeColors = new Map<string, string>();
+  private wasmWorkerFile: string;
+
+  //private readonly documentCollection = new VaporviewDocumentCollection();
+  public getDocumentFromUri(uri: string): VaporviewDocument | undefined {
+    return this.documentCollection.getDocumentFromUri(uri);
+  }
+  public getDocumentFromId(documentId: DocumentId): VaporviewDocument | undefined {
+    return this.documentCollection.get(documentId);
+  }
+  private readonly remoteConnections = new Map<string, {
+    serverUrl: string;
+    bearerToken?: string;
+  }>();
+
+  private activeWebview: vscode.WebviewPanel | undefined;
+  private activeDocument: VaporviewDocument | undefined;
+  private lastActiveWebview: vscode.WebviewPanel | undefined;
+  public e2ePanel(): vscode.WebviewPanel | undefined { return this.lastActiveWebview; } // vscode-port: e2e hook
+  private lastActiveDocument: VaporviewDocument | undefined;
+  public get getActiveDocument(): VaporviewDocument | undefined {return this.activeDocument;}
+  public get getLastActiveDocument(): VaporviewDocument | undefined {return this.lastActiveDocument;}
+
+  // API endpoints
+  public netlistTreeDataProvider: NetlistTreeDataProvider;
+  public netlistView: vscode.TreeView<NetlistItem>;
+  public statusBar: VaporviewStatusBar;
+
+  // Event emitters
+  public static readonly markerSetEventEmitter = new vscode.EventEmitter<MarkerSetEvent>();
+  public static readonly signalSelectEventEmitter = new vscode.EventEmitter<SignalEvent>();
+  public static readonly addVariableEventEmitter = new vscode.EventEmitter<SignalEvent>();
+  public static readonly removeVariableEventEmitter = new vscode.EventEmitter<SignalEvent>();
+  public static readonly valueLinkEventEmitter = new vscode.EventEmitter<ValueLinkEvent>();
+  public static readonly externalDropEventEmitter = new vscode.EventEmitter<ViewerDropEvent>();
+  private readonly _onDidChangeCustomDocument = new vscode.EventEmitter<vscode.CustomDocumentEditEvent<VaporviewDocument>>();
+  public readonly onDidChangeCustomDocument = this._onDidChangeCustomDocument.event;
+
+  // Quick Pick Menu
+  private quickPick: NetlistSearchQuickPick;
+
+  constructor(
+    private readonly _context: vscode.ExtensionContext,
+    public  readonly log: vscode.OutputChannel,
+    private readonly wasmModule: WebAssembly.Module,
+    private readonly documentCollection: VaporviewDocumentCollection
+  ) {
+
+    // Create and register the Netlist and Displayed Signals view container
+    this.netlistTreeDataProvider = new NetlistTreeDataProvider();
+    this.netlistView = vscode.window.createTreeView('waveformViewerNetlistView', {
+      treeDataProvider: this.netlistTreeDataProvider,
+      manageCheckboxStateManually: true,
+      canSelectMany: true,
+      showCollapseAll: true,
+      dragAndDropController: netlistItemDragAndDropController
+    });
+    this._context.subscriptions.push(this.netlistView);
+
+    this.statusBar = new VaporviewStatusBar(this._context);
+
+    // Subscribe to the View events. We need to subscribe to expand and collapse events
+    // because the collapsible state would not otherwise be preserved when the tree view is refreshed
+    this.netlistView.onDidExpandElement(this.handleNetlistExpandElement);
+    this.netlistView.onDidCollapseElement(this.handleNetlistCollapseElement);
+    this.netlistView.onDidChangeSelection(this.handleNetlistViewSelectionChanged, this, this._context.subscriptions);
+
+    this.wasmWorkerFile = vscode.Uri.joinPath(this._context.extensionUri, 'dist', 'worker.js').fsPath;
+    this.quickPick = new NetlistSearchQuickPick();
+  }
+
+  async openCustomDocument(
+    uri: vscode.Uri,
+    openContext: { backupId?: string },
+    _token: vscode.CancellationToken,
+  ): Promise<VaporviewDocument> {
+
+    const delegate: VaporviewDocumentDelegate = {
+      addSignalByNameToDocument: this.addSignalByNameToDocument.bind(this),
+      logOutputChannel: (message: string) => {this.log.appendLine(message);},
+      updateViews: (uri: vscode.Uri) => {return;}, // placeholder function to be overridden once we create the document
+      emitEvent: (e: EmitEventMessage) => {this.emitEvent(e);},
+      removeFromCollection: this.removeFromCollection.bind(this),
+      getColorPalette: () => {return this.documentCollection.getColorPalette();},
+    };
+
+    let handler: WaveformFileParser;
+    if (uri.scheme === 'vaporview-remote') {
+      const connectionInfo = await this.getRemoteConnectionInfo(uri);
+      // Create Surfer handler
+      handler = await SurferFormatHandler.create(delegate, uri, connectionInfo.serverUrl, this.wasmWorkerFile, this.wasmModule, connectionInfo.bearerToken);
+    } else {
+      const fileType = uri.fsPath.split('.').pop()?.toLocaleLowerCase() || '';
+      // vscode-port: FSDB and WCZ go through wisp-helper (our native reader). Upstream's own FSDB addon (built
+      // by the user against their Verdi) is used only when vaporview.fsdbAddonPath is set explicitly.
+      const fsdbAddonPath = String(vscode.workspace.getConfiguration('vaporview').get('fsdbAddonPath') || '').trim();
+      if (fileType === 'fsdb' && fsdbAddonPath !== '') {
+        handler = new FsdbFormatHandler(delegate, uri, async () => null);
+      } else if (fileType === 'fsdb' || fileType === 'wcz') {
+        handler = new WispFormatHandler(delegate, uri, this._context.extensionPath);
+      } else {
+        handler = await WasmFormatHandler.create(delegate, uri, fileType, this.wasmWorkerFile, this.wasmModule);
+      }
+    }
+
+    // Create the document and load it using its handler
+    const document = await VaporviewDocument.create(uri, handler, delegate, this.documentCollection);
+
+    delegate.updateViews = (uri: vscode.Uri) => {
+      if (this.activeDocument?.uri !== uri) {return;}
+      this.netlistTreeDataProvider.loadDocument(document);
+    };
+
+    // vscode-port: a failed load disposes the document. Otherwise it stays in the collection with no webview, and
+    // openFileCommand's whenWebviewInitialized() (upstream c951ae1) waits forever on a file that could not be opened.
+    try {
+      await document.load();
+    } catch (e) {
+      document.dispose();
+      // vscode-port: a wisp file that cannot be opened gets a tab that says why (never a blank tab). The
+      // placeholder is not in the document collection, so nothing else treats it as an open waveform.
+      if (handler instanceof WispFormatHandler) {
+        return failedDocument(uri, e instanceof Error ? e.message : String(e)) as unknown as VaporviewDocument;
+      }
+      throw e;
+    }
+    // vscode-port: Trace Driver / Trace to Root on FSDB/WCZ ask wisp-helper's windowed queries, never
+    // whole histories through the data API. (Kept per document in a WeakMap; it goes with the document.)
+    if (handler instanceof WispFormatHandler) { setTraceDumpSource(document, new WispTraceSource(handler)); }
+    return document;
+  }
+
+  async resolveCustomEditor(
+    document: VaporviewDocument,
+    webviewPanel: vscode.WebviewPanel,
+    _token: vscode.CancellationToken
+  ): Promise<void> {
+
+    // vscode-port: the failed-open placeholder shows its message
+    const failed = (document as unknown as {openError?: string}).openError;
+    if (failed !== undefined) {
+      webviewPanel.webview.options = {enableScripts: false, enableCommandUris: ['workbench.action.openSettings', 'vaporview.wisp.retryOpen']};
+      webviewPanel.webview.html = failedOpenHtml(document.uri, failed);
+      failedOpenPages.set(document.uri.toString(), webviewPanel.webview.html);
+      webviewPanel.onDidDispose(() => failedOpenPages.delete(document.uri.toString()));
+      return;
+    }
+
+    // vscode-port: per-panel listeners are disposed with the panel. In context.subscriptions (extension
+    // lifetime) their closures kept every closed document, and its whole netlist, alive.
+    const panelDisposables: vscode.Disposable[] = [];
+
+    // Add a message handler for the webview
+    webviewPanel.webview.onDidReceiveMessage(e => {
+
+      if (handleBridgeMessage(document, webviewPanel, e)) {return;} // vscode-port: cmux page-module bridge
+      switch (e.command) {
+        case 'logOutput':           {this.log.appendLine(e.message); break;}
+        case 'e2e-reply':           {e2eResolve(e); break;} // vscode-port: test hook
+        case 'showMessage':         {this.handleWebviewMessage(e); break;}
+        case 'copyToClipboard':     {vscode.env.clipboard.writeText(e.text); break;}
+        case 'executeCommand':      {vscode.commands.executeCommand(e.commandName, ...(e.args || [])); break;}
+        case 'updateConfiguration': {vscode.workspace.getConfiguration('vaporview').update(e.property, e.value, vscode.ConfigurationTarget.Global); break;}
+        case 'ready':               {document.onWebviewReady(webviewPanel); break;}
+        case 'initialized':         {document.onWebviewInitialized(); break;}
+        case 'restoreState':        {this.restoreState(e.state, e.uri); break;}
+        case 'contextUpdate':       {this.handleUpdateWebviewContext(document, e); break;}
+        case 'emitEvent':           {this.emitEvent(e); break;}
+        case 'fetchDataFromFile':   {document.fetchData(e.requestList); break;}
+        case 'close-webview':       {webviewPanel.dispose(); break;}
+        case 'handleDrop':          {this.handleWebviewDrop(e); break;}
+        case 'focus':               {webviewPanel.reveal(); break;}
+        case 'v2':                  {document.relayV2(e.req); break;} // vscode-port: windowed viewer -> wisp-helper
+        default: {this.log.appendLine('Unknown message type from webview: ' + JSON.stringify(e)); break;}
+      }
+
+      if (e.type === 'response')    {this.onMessage(e);}
+    }, this, panelDisposables);
+
+    // Handle switching tab events
+    webviewPanel.onDidChangeViewState(e => {
+      if (e.webviewPanel.active) {
+        this.onDidChangeViewStateActive(document, webviewPanel);
+        webviewPanel.webview.postMessage({command: 'getContext'});
+      } else if (!e.webviewPanel.visible && e.webviewPanel === this.activeWebview) {
+        this.onDidChangeViewStateInactive();
+      }
+    }, this, panelDisposables);
+
+    // Handle closing of the webview panel/document
+    webviewPanel.onDidDispose(() => {
+      if (this.activeWebview === webviewPanel) {
+        this.onDidChangeViewStateInactive();
+      }
+      if (this.lastActiveWebview === webviewPanel) {
+        this.lastActiveWebview = undefined;
+        this.lastActiveDocument = undefined;
+      }
+      panelDisposables.forEach((d) => d.dispose());
+      panelDisposables.length = 0;
+    }, this, panelDisposables);
+
+    // Setup initial content for the webview
+    webviewPanel.webview.options = { enableScripts: true, };
+    webviewPanel.webview.html    = this.getHtmlContent(webviewPanel.webview);
+
+    this.onDidChangeViewStateActive(document, webviewPanel);
+  }
+
+  backupCustomDocument(document: VaporviewDocument, context: vscode.CustomDocumentBackupContext, cancellation: vscode.CancellationToken): Thenable<vscode.CustomDocumentBackup> {
+    return Promise.resolve(new VaporviewDocumentBackup(document.uri.toString()));
+  }
+
+  revertCustomDocument(document: VaporviewDocument, cancellation: vscode.CancellationToken): Thenable<void> {
+    if (document.saveFileUri) {
+      this.loadSessionFromFileUri(document, document.saveFileUri, false);
+    }
+    return Promise.resolve();
+  }
+
+  async saveCustomDocument(document: VaporviewDocument, cancellation: vscode.CancellationToken): Promise<void> {
+    // When a user loads a document, the document may be dirty, so it sets this flag and calls a dummy save
+    if (document.clearDirtyStatus) {
+      document.clearDirtyStatus = false;
+    } else {
+      await this.saveSessionToFile(document, document.saveFileUri, cancellation);
+    }
+  }
+
+  async saveCustomDocumentAs(document: VaporviewDocument, destination: vscode.Uri, cancellation: vscode.CancellationToken): Promise<void> {
+    await this.saveSessionToFile(document, destination, cancellation);
+  }
+
+  public getDocumentFromOptionalUri(uri: string | undefined): VaporviewDocument | undefined {
+    if (!uri) {return this.activeDocument;}
+    else {return this.documentCollection.getDocumentFromUri(uri);}
+  }
+
+  public getAllDocumentUris() {
+    return this.documentCollection.getAllDocuments().map(entry => entry.uri.toString());
+  }
+
+  public getViewerState(uri: string | undefined) {
+    const document = this.getDocumentFromOptionalUri(uri);
+    if (!document) {return;}
+    return document.getWebviewSession();
+  }
+
+  public async getRemoteConnectionInfo(uri: vscode.Uri) {
+
+    let connectionInfo = this.remoteConnections.get(uri.toString());
+    if (connectionInfo) {return connectionInfo;}
+
+    // Try to restore connection info from extension state
+    const persistedConnection = this._context.globalState.get<{serverUrl: string, bearerToken?: string}>(`remote-connection-${uri.toString()}`);
+    if (persistedConnection) {
+      connectionInfo = persistedConnection;
+      this.remoteConnections.set(uri.toString(), connectionInfo);
+    } else {
+      // Prompt user to reconnect
+      const action = await vscode.window.showErrorMessage(
+        `Remote connection lost for ${uri.path}. Please reconnect.`,
+        'Reconnect', 'Close Tab'
+      );
+      if (action === 'Reconnect') {
+        // Close the current tab and show reconnection dialog
+        await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+        await vscode.commands.executeCommand('vaporview.openRemoteViewer');
+      }
+      throw new Error(`Remote connection lost and user chose not to reconnect`);
+    }
+    return connectionInfo;
+  }
+
+  // True when the URL is plain http:// to a host other than this machine, i.e. a
+  // bearer token sent to it would cross the network unencrypted.
+  private isPlaintextNonLoopback(serverUrl: string): boolean {
+    let url: URL;
+    try { url = new URL(serverUrl);}
+    catch { return false; }
+    if (url.protocol !== 'http:') {return false;}
+    const host = url.hostname.toLowerCase();
+    const isLoopback = host === 'localhost' || host.endsWith('.localhost') ||
+      host === '[::1]' || /^127(\.\d{1,3}){3}$/.test(host);
+    return !isLoopback;
+  }
+
+  public async openRemoteViewer(serverUrl: string, bearerToken?: string) {
+    if (bearerToken && this.isPlaintextNonLoopback(serverUrl)) {
+      const choice = await vscode.window.showWarningMessage(
+        `${serverUrl} uses unencrypted HTTP. Your bearer token will be sent in plain text and can be read by anyone on the network path.`,
+        { modal: true },
+        'Connect Anyway'
+      );
+      if (choice !== 'Connect Anyway') {
+        this.log.appendLine(`Remote viewer connection to ${serverUrl} cancelled: bearer token over plain HTTP`);
+        return;
+      }
+    }
+    try {
+      // Create a URI with the custom vaporview-remote scheme
+      const sanitizedUrl = serverUrl.replace(/[^a-zA-Z0-9.-]/g, '_');
+
+      // This can be changed to the actual filename of the remote file
+      // This is simpler so we avoid another http request
+      const remoteUri = vscode.Uri.parse(`vaporview-remote://${sanitizedUrl}/remote-waveforms.vcd`).with({scheme: 'vaporview-remote'});
+      
+      // Store connection info for use in openCustomDocument
+      const connectionInfo = { serverUrl, bearerToken };
+      this.remoteConnections.set(remoteUri.toString(), connectionInfo);
+      
+      // Persist connection info to extension state for reload recovery
+      await this._context.globalState.update(`remote-connection-${remoteUri.toString()}`, connectionInfo);
+      
+      // Use VS Code's standard document opening mechanism
+      await vscode.commands.executeCommand('vscode.openWith', remoteUri, WaveformViewerProvider.viewType);
+      
+      this.log.appendLine(`Opened remote viewer for ${serverUrl}`);
+      
+    } catch (error) {
+      vscode.window.showErrorMessage(`Failed to open remote viewer: ${error}`);
+      this.log.appendLine(`Failed to open remote viewer: ${error}`);
+    }
+  }
+
+  public async saveSessionToFile(specifiedDocument: VaporviewDocument | undefined, saveFileUri: vscode.Uri | undefined, cancellation?: vscode.CancellationToken) {
+    let document: VaporviewDocument | undefined = specifiedDocument;
+    if (!document) {
+      document = this.activeDocument;
+    }
+
+    if (!document) {
+      vscode.window.showErrorMessage('No viewer is active. Please select the viewer you wish to save session.');
+      throw new Error('No active document to save');
+    }
+
+    const autosave = vscode.workspace.getConfiguration('files').get('autoSave');
+    const autosaveOff = (autosave === 'off');
+
+    let uri = saveFileUri;
+    if (!saveFileUri && autosaveOff) {
+      const filePath = document.uri.fsPath;
+      const fileName = path.basename(filePath);
+      const saveFileName = fileName.replace(/\.[^/.]+$/, '') + '.json' || 'untitled.json';
+      uri = await vscode.window.showSaveDialog({
+        saveLabel: 'Save session',
+        filters: {JSON: ['json']},
+        defaultUri: vscode.Uri.file(path.join(dirname(filePath), saveFileName)),
+      });
+    }
+
+    // User cancelled the save dialog
+    if (!uri || cancellation?.isCancellationRequested) {
+      throw new Error('Save cancelled, or location was not provided');
+    }
+
+    const saveData       = document.getWebviewSession();
+    const saveDataString = JSON.stringify(saveData, null, 2);
+    await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(saveDataString));
+    document.saveFileUri = uri;
+  }
+
+  // Opens a waveform file and resolves only once the webview is initialized, so callers
+  // can immediately send state/signals. 'vscode.openWith' alone only waits for
+  // resolveCustomEditor, which returns before the webview script has even run.
+  public async openFileCommand(args: OpenFileArgs) {
+    if (!args?.uri) {return;}
+    await vscode.commands.executeCommand('vscode.openWith', args.uri, 'vaporview.waveformViewer');
+    const document = this.documentCollection.getDocumentFromUri(args.uri.toString());
+    if (!document) {return;}
+    await document.whenWebviewInitialized();
+    if (args.loadAll) {this.loadAllVariablesFromFile(args.uri.toString(), args.maxSignals || 64);}
+  }
+
+  public async loadViewerStateCommand(args: LoadViewerStateArgs) {
+
+    const document = this.getDocumentFromCommandArgs({uri: args.documentUri});
+
+    if (!document) {return;}
+    if (!args.sessionFileUri) {return;}
+
+    // The document can exist before its webview is ready to receive 'apply-state'
+    await document.whenWebviewInitialized();
+    await this.loadSessionFromFileUri(document, vscode.Uri.parse(args.sessionFileUri), true);
+  }
+
+  public async loadSessionFromFile() {
+
+    if (!this.activeDocument) {
+      vscode.window.showErrorMessage('No viewer is active. Please select the viewer you wish to load session into.');
+      return;
+    }
+
+    //let version  = vscode.extensions.getExtension('Lramseyer.vaporview')?.packageJSON.version;
+    // show open file dialog
+    const uri = await new Promise<vscode.Uri>((resolve, reject) => {
+      vscode.window.showOpenDialog({
+        canSelectFiles: true,
+        canSelectFolders: false,
+        canSelectMany: false,
+        openLabel: 'Load session',
+        filters: { JSON: ['json'] }
+      }).then((uri) => {
+        if (uri) {
+          resolve(uri[0]);
+        } else {
+          reject("No file selected"); // Reject if no file is selected
+        }
+      }, (error: unknown) => {
+        reject(error); // Reject if showOpenDialog fails
+      });
+    });
+
+    if (!uri) {return;}
+
+    await this.loadSessionFromFileUri(this.activeDocument, uri, true);
+  }
+
+  public async loadSessionFromFileUri(document: VaporviewDocument, saveFileUri: vscode.Uri, saveEvent: boolean): Promise<void> {
+    const fileData = await vscode.workspace.fs.readFile(saveFileUri).then((data) => {
+      return JSON.parse(new TextDecoder().decode(data));
+    });
+
+    if (!fileData) {return;}
+    if (fileData.fileName && fileData.fileName !== document.uri.fsPath) {
+      vscode.window.showWarningMessage('The session file may not match the active viewer');
+    }
+
+    this.log.appendLine('Loading session state from file: ' + fileData.fileName);
+    document.saveFileUri = saveFileUri;
+    document.applySessionState(fileData, StateChangeType.File, false);
+
+    // We have to trick VScode in to thinking that the file was saved so that it clears the dirty status
+    if (saveEvent) {
+      //await vscode.commands.executeCommand('workbench.action.files.save');
+      document.clearDirtyStatus = true;
+      vscode.workspace.save(document.uri);
+    }
+  }
+
+  public restoreState(state: WebviewSession | undefined, uri: vscode.Uri | string) {
+    const fileUri = typeof uri === 'string' ? vscode.Uri.parse(uri) : uri;
+    let document = this.documentCollection.getDocumentFromUri(fileUri.toString());
+    if (!document) {
+      document = this.activeDocument;
+    }
+    if (!document) {return;}
+
+    if (state) {
+      document.applySessionState(state, StateChangeType.Restore, false);
+    } else {
+      // check the directory for a file with the same name as the document, but with the extension .vaporview.json
+      const filePath = fileUri.fsPath.match(/^(.*)\.[^.]+$/)?.[1] + '.json';
+      if (fs.existsSync(filePath)) {
+        const sessionFileUri = vscode.Uri.file(filePath);
+        const promptLoadSession = vscode.workspace.getConfiguration('vaporview').get('promptLoadSettings');
+
+        if (promptLoadSession === 'Never') {
+          return;
+        } else if (promptLoadSession === 'Always') {
+          this.loadSessionFromFileUri(document, sessionFileUri, true);
+          return;
+        }
+
+        // if promptLoadSettings is 'Ask', then we ask the user if they want to restore the state from the file
+        vscode.window.showInformationMessage(
+          'Restore state from file: ' + filePath + '?\n' +
+          'You can set a default behavior and disable this prompt in the extension settings.',
+          'Yes', 'No', 'Settings'
+        ).then((action) => {
+          if (action === 'Yes') {
+            this.loadSessionFromFileUri(document, sessionFileUri, true);
+          } else if (action === 'Settings') {
+            // Open the settings page for the extension
+            vscode.commands.executeCommand('workbench.action.openSettings', 'vaporview.promptLoadSettings');
+          }
+        });
+      }
+    }
+  }
+
+  async reloadFile(e: vscode.Uri) {
+
+    let document: VaporviewDocument | undefined;
+    if (e.fsPath) {
+      document = this.documentCollection.getDocumentFromUri(e.toString());
+    } else {
+      document = this.activeDocument;
+    }
+    if (!this.activeDocument) {return;}
+    if (!document) {return;}
+    if (document.uri.fsPath !== this.activeDocument.uri.fsPath) {return;}
+
+    //const session = document.getWebviewSession();
+    this.netlistTreeDataProvider.hide();
+    await document.reload();
+  }
+
+  removeFromCollection(uri: vscode.Uri, document: VaporviewDocument) {
+    this.documentCollection.remove(document.documentId);
+    // Clean up remote connection info if this is a vaporview-remote:// URI
+    if (uri.scheme === 'vaporview-remote') {
+      this.remoteConnections.delete(uri.toString());
+      // Also clean up persisted state
+      this._context.globalState.update(`remote-connection-${uri.toString()}`, undefined);
+    }
+  }
+
+  copyWaveDrom() {
+    this.activeWebview?.webview.postMessage({command: 'copyWaveDrom'});
+  }
+
+  setWaveDromClock(edge: string, netlistId: NetlistId | null) {
+    this.activeWebview?.webview.postMessage({
+      command: 'setWaveDromClock',
+      edge: edge,
+      netlistId: netlistId,
+    });
+  }
+
+  handleWebviewMessage(event: WebviewMessageEvent) {
+    switch (event.messageType) {
+      case WindowMessageType.Warning: {vscode.window.showWarningMessage(event.message); break;}
+      case WindowMessageType.Error:   {vscode.window.showErrorMessage(event.message); break;}
+      case WindowMessageType.Info:    {vscode.window.showInformationMessage(event.message); break;}
+      default:                        {vscode.window.showInformationMessage(event.message); break;}
+    }
+  }
+
+  setMarkerAtTimeWithUnits(time: number, unit: string, altMarker: number) {
+
+    if (!this.lastActiveDocument) {return;}
+  
+    const metadata  = this.lastActiveDocument.metadata;
+    const timeScale = metadata.timeScale;
+    const timeUnit  = scaleFromUnits(metadata.timeUnit);
+
+    if (!timeScale || !timeUnit) {return;}
+
+    const scaleFactor = scaleFromUnits(unit) / (timeUnit * timeScale);
+
+    this.setMarkerAtTime(Math.round(time * scaleFactor), altMarker);
+  }
+
+  setMarkerAtTime(time: number, altMarker: number) {
+
+    if (!this.lastActiveWebview) {return;}
+    if (!this.lastActiveDocument) {return;}
+
+    // Check to see that the time is not out of bounds
+    const timeEnd = this.lastActiveDocument.metadata.timeEnd;
+    if (time < 0 || time > timeEnd) {return;}
+
+    this.lastActiveWebview.webview.postMessage({command: 'setMarker', time: time, markerType: altMarker});
+  }
+
+  async updateTimeUnits(newUnits: string) {
+
+    if (!this.lastActiveWebview) {return;}
+    if (!this.lastActiveDocument) {return;}
+
+    const timeUnit  = scaleFromUnits(this.lastActiveDocument.metadata.timeUnit);
+    const timeEnd   = this.lastActiveDocument.metadata.timeEnd;
+    const timeScale = this.lastActiveDocument.metadata.timeScale;
+    const maxTime   = timeUnit * timeScale * timeEnd;
+    const unitsList = ['fs', 'ps', 'ns', 'µs', 'ms', 's'];
+    const selectableUnits = unitsList.filter((unit) => {return scaleFromUnits(unit) <= maxTime;});
+
+    let units: string | undefined = newUnits;
+
+    if (newUnits === "") {
+      await vscode.window.showQuickPick(
+        selectableUnits,
+        {
+          placeHolder: 'Select Time Units',
+          canPickMany: false,
+        }
+      ).then((unit) => {
+        units = unit;
+      });
+    }
+
+    if (units === undefined || units === "") {return;}
+    this.lastActiveWebview.webview.postMessage({command: 'updateRulerSettings', units: units});
+  }
+
+  handleUpdateWebviewContext(document: VaporviewDocument, event: WebviewStateEvent) {
+    if (!document) {return;}
+    const isDirty = document.captureWebviewState(event);
+
+    if (isDirty) {
+      this._onDidChangeCustomDocument.fire({
+        document,
+        undo: () => {document.undo();},
+        redo: () => {document.redo();}
+      });
+    }
+
+    if (event.autoReload && document.fileUpdated && document.reloadPending) {
+      vscode.commands.executeCommand('vaporview.reloadFile', document.uri);
+    } else {
+      this.statusBar.update(document, event);
+    }
+  }
+
+  emitEvent(e: EmitEventMessage) {
+
+    //console.log(e);
+
+    switch (e.eventType) {
+      case 'markerSet':      {WaveformViewerProvider.markerSetEventEmitter.fire(e.eventData as MarkerSetEvent); break;}
+      case 'signalSelect':   {WaveformViewerProvider.signalSelectEventEmitter.fire(e.eventData as SignalEvent); break;}
+      case 'addVariable':    {WaveformViewerProvider.addVariableEventEmitter.fire(e.eventData as SignalEvent); break;}
+      case 'removeVariable': {WaveformViewerProvider.removeVariableEventEmitter.fire(e.eventData as SignalEvent); break;}
+      case 'valueLink':      {WaveformViewerProvider.valueLinkEventEmitter.fire(e.eventData as ValueLinkEvent); break;}
+    }
+  }
+
+  onDidChangeViewStateActive(document: VaporviewDocument, webviewPanel: vscode.WebviewPanel) {
+    this.activeWebview  = webviewPanel;
+    this.activeDocument = document;
+    this.lastActiveWebview  = webviewPanel;
+    this.lastActiveDocument = document;
+    this.netlistTreeDataProvider.loadDocument(document);
+    document.setSearchCommandContext();
+  }
+
+  onDidChangeViewStateInactive() {
+    this.activeWebview  = undefined;
+    this.activeDocument = undefined;
+    this.netlistTreeDataProvider.hide();
+    this.statusBar.hide();
+    vscode.commands.executeCommand('setContext', 'vaporview.netlistSearchable', false);
+  }
+
+  async showInNetlistViewByName(signalName: string) {
+    if (!this.lastActiveDocument) {return;}
+    const document = this.lastActiveDocument;
+    const metadata = await document.findTreeItem(signalName, undefined, undefined);
+    if (metadata !== null) {
+      this.netlistView.reveal(metadata, {select: true, focus: false, expand: 3});
+    }
+  }
+
+  showInNetlistView(e: { netlistId?: NetlistId } | undefined) {
+
+    if (!this.lastActiveDocument) {return;}
+    const document = this.lastActiveDocument;
+    let netlistId: NetlistId | undefined | null ;
+
+    if (e) {
+      netlistId = e.netlistId;
+    } else {
+      netlistId = document.webviewContext.selectedSignal;
+    }
+
+    if (netlistId === null || netlistId === undefined) {return;}
+    const netlistItem = document.netlistIdTable[netlistId];
+    if (netlistItem) {
+      this.netlistView.reveal(netlistItem, {select: true, focus: false, expand: 3});
+    }
+  }
+
+  private _requestId = 1;
+  private readonly _callbacks = new Map<number, (response: unknown) => void>();
+  private postMessageWithResponse<R = unknown>(panel: vscode.WebviewPanel, type: string, body: Record<string, unknown>): Promise<R> {
+    const requestId = this._requestId++;
+    const p = new Promise<R>(resolve => this._callbacks.set(requestId, resolve as (response: unknown) => void));
+    panel.webview.postMessage({ type, requestId, body });
+    return p;
+  }
+
+  private onMessage(message: WebviewResponseMessage) {
+    const callback = this._callbacks.get(message.requestId);
+    callback?.(message.body);
+  }
+
+  // #region Command Handlers
+  private getDocumentFromCommandArgs(e: { uri?: string }): VaporviewDocument | undefined {
+    if (e.uri !== undefined) {
+      const document = this.documentCollection.getDocumentFromUri(e.uri);
+      if (!document) {
+        vscode.window.showErrorMessage('Document not found: ' + e.uri);
+        return undefined;
+      } else {
+        return document;
+      }
+    } else if (this.activeDocument) {
+      return this.activeDocument;
+    } else {
+      return this.lastActiveDocument;
+    }
+  }
+
+  private async getNetlistItemFromCommandArgs(e: VariableActionArgs): Promise<NetlistItem | null> {
+    // CHeck for URI in the event
+    let path;
+    let metadata: NetlistItem | null = null;
+    const document = this.getDocumentFromCommandArgs(e);
+    if (!document) {return null;}
+
+    // Check for netlistId in the event
+    if (e.netlistId !== undefined) {
+      metadata = document.netlistIdTable[e.netlistId];
+      if (metadata === undefined) {
+        vscode.window.showWarningMessage('Signal not found: ' + e.netlistId);
+        return null;
+      }
+    
+    } else {
+      // Check for instance path
+      if (e.instancePath !== undefined) {
+        path = e.instancePath;
+      } else {
+        if (e.scopePath !== undefined) {
+          path = (path ?? '') + e.scopePath + ".";
+        }
+        path = (path ?? '') + (e.name ?? '');
+      }
+      metadata = await document.findTreeItem(path ?? '', e.msb, e.lsb);
+    }
+
+    return metadata;
+  }
+
+  public loadAllVariablesFromFile(uri: string, maxSignals: number) {
+    const document = this.documentCollection.getDocumentFromUri(uri);
+    if (!document) {return;}
+    const netlistIdCount = document.metadata.netlistIdCount;
+    if (netlistIdCount > maxSignals || netlistIdCount > 64) {return;}
+
+    document.treeData.forEach(scope => {
+      this.addChildVariablesToDocument(document, scope, true, maxSignals, true);
+    });
+  }
+
+  // Add or remove signals from the waveform viewer
+  public async variableActionCommandHandler(e: VariableActionArgs, action: VariableAction) {
+    // Check for URI in the command
+    const document = this.getDocumentFromCommandArgs(e);
+    if (!document) {return;}
+    if (document.uri.fsPath !== this.activeDocument?.uri.fsPath) {
+      document.reveal();
+    }
+    // vscode-port: single adds that arrive together (API calls in a loop) go to the page as one renderSignals
+    const queued = action === 'add' ? this.beginAdd(document) : undefined;
+    try {
+      await this.variableAction(document, e, action, queued);
+    } finally { queued?.(null); }
+  }
+
+  private async variableAction(document: VaporviewDocument, e: VariableActionArgs, action: VariableAction, queued: ((netlistId: NetlistId | null) => void) | undefined) { // vscode-port: body of variableActionCommandHandler
+    // vscode-port: a viewer just opened (vscode.openWith, the API) gets the command once its page can take it; sent
+    // before, the add was lost and the row never showed.
+    await document.whenWebviewInitialized();
+
+    const metadata = await this.getNetlistItemFromCommandArgs(e);
+    if (metadata === null) {
+      // vscode-port: name what was asked for (a by-path add has no netlistId: upstream printed "undefined"), and note it
+      // where a scripted caller can see it (the output log; the wisp handler's messages on FSDB/WCZ).
+      const asked = e.instancePath ?? (e.scopePath !== undefined || e.name !== undefined ? (e.scopePath ? e.scopePath + '.' : '') + (e.name ?? '') : e.netlistId);
+      const msg = 'Signal not found: ' + asked;
+      vscode.window.showWarningMessage(msg);
+      this.log.appendLine(msg);
+      ((document as unknown as {_handler: {noteMessage?: (m: string) => void}})._handler).noteMessage?.(msg);
+      return;
+    }
+
+    switch (action) {
+      case 'add': {
+        if (metadata.contextValue === 'netlistScope') {
+          const recursive = e.recursive === true;
+          this.addAllInScopeToDocument(metadata, recursive, 128);
+        } else {
+          const isDisplayed = document.isSignalDisplayed(metadata.netlistId);
+          if (e.reveal === true && isDisplayed) {
+            document.revealSignalInWebview(metadata.netlistId);
+          } else if (queued) { // vscode-port: coalesced (beginAdd)
+            queued(metadata.netlistId);
+          } else {
+            document.renderSignals([metadata.netlistId], [], undefined);
+          }
+        }
+        break;
+      } 
+      case 'remove': {
+        if (metadata.contextValue !== 'netlistScope') {
+          const netlistId = metadata.netlistId;
+          document.removeSignalFromWebview(netlistId, undefined, false);
+        }
+        break;
+      } 
+      case 'reveal': {
+        this.netlistView.reveal(metadata, {select: true, focus: false, expand: 0});
+        break;
+      }
+      case "addLink": {
+        if (metadata.contextValue !== 'netlistScope') {
+          this.setValueFormat({netlistId: metadata.netlistId}, 0, {valueLinkEnable: e.valueLinkEnable === true});
+        }
+        break;
+      }
+    }
+  }
+
+  public markerCommandHandler(e: SetMarkerArgs) {
+
+    if (e.time === undefined) {return;}
+
+    const document = this.getDocumentFromCommandArgs(e);
+    if (!document) {return;}
+    if (document.uri.fsPath !== this.activeDocument?.uri.fsPath) {
+      document.reveal();
+    }
+
+    const markerType = e.markerType || 0;
+    if (e.units !== undefined) {
+      this.setMarkerAtTimeWithUnits(e.time, e.units, markerType);
+    } else {
+      this.setMarkerAtTime(e.time, markerType);
+    }
+  }
+
+  public handleKeyBinding(e: unknown, keyCommand: string) {
+    if (!this.activeWebview) {return;}
+    this.activeWebview.webview.postMessage({
+      command: 'handle-keypress',
+      keyCommand: keyCommand,
+      event: e
+    } as ExternalKeyDownMessage);
+  }
+
+  private handleWebviewDrop(e: WebviewDropMessage) {
+
+    const unknownUriList: vscode.Uri[] = [];
+    const netlistIdList: NetlistId[] = [];
+    const document = this.documentCollection.get(e.documentId);
+    if (!document) {return;}
+    if (!e.resourceUriList) {return;}
+
+    e.resourceUriList.forEach((uri: vscode.Uri) => {
+      if (uri.scheme === 'waveform') {
+
+        //const fragment = uri.fragment;
+        //if (fragment === undefined || fragment === "") {return;}
+        //fragment.split('&').forEach((tag: string) => {
+        //  const [key, value] = tag.split('=');
+        //  if (key === "var") {netlistIdList.push(parseInt(value));}
+        //});
+        const decoded = decodeNetlistUri(uri);
+        if (decoded.id !== undefined) {
+          netlistIdList.push(decoded.id);
+        }
+        return;
+      } else if (uri.scheme === 'file') {
+        // If the file is a JSON file, we can try to load it as a session file
+        const fileName = uri.fsPath || uri.path;
+        if (fileName.endsWith('.json')) {
+          const sanitizedUri = vscode.Uri.file(fileName);
+          this.loadSessionFromFileUri(document, sanitizedUri, true);
+          return;
+        }
+      }
+      unknownUriList.push(uri);
+    });
+
+    let groupPath: string[] = [];
+    let index;
+    if (e.groupPath) {groupPath = e.groupPath;}
+    if (e.dropIndex || e.dropIndex === 0) {index = e.dropIndex;}
+
+    if (document !== this.activeDocument) {return;}
+    document.renderSignals(netlistIdList, groupPath, index);
+    // shift focus to the document if any signals were added
+    if (netlistIdList.length > 0) {
+      document.reveal();
+    }
+
+    // Emit an event for the unknown URIs so that other extensions can handle them if needed
+    if (unknownUriList.length === 0) {return;}
+    WaveformViewerProvider.externalDropEventEmitter.fire({
+      uri: document.uri.toString(),
+      resourceUriList: unknownUriList,
+      groupPath: groupPath,
+      index: index ?? 0
+    });
+  }
+
+  //private addSignalsToDocument(document: VaporviewDocument, netlistElements: NetlistItem[], groupPath: string[], index: number | undefined) {
+  //  const netlistIdList = netlistElements.map((element) => element.netlistId);
+  //  document.renderSignals(netlistIdList, groupPath, index);
+  //}
+
+
+  public async getNetlistItemFromSignalName(document: VaporviewDocument, signalName: string): Promise<NetlistItem | null> {
+
+    // remove colon or semicolon from end of signal name
+    const instancePath = signalName.replace(/[:;]$/, '');
+    // get msb and lsb from signal name
+    const regex  = /\[(\d+:)?(\d+)\]$/;
+    const field  = instancePath.match(regex);
+    const lookup = instancePath.replace(regex, '');
+    const msb   = field ? parseInt(field[1], 10) : undefined;
+    const lsb   = field ? parseInt(field[2], 10) : msb;
+    // vscode-port: a variable may be named with its index (a memory word "mem[12]", an array element "a[3:0]"): the
+    // full name as a child wins; only then is a trailing [n] / [a:b] read as a bit select of the variable before it.
+    if (field) {
+      const whole = await document.findTreeItem(instancePath, undefined, undefined);
+      if (whole) {return whole;}
+    }
+    return await document.findTreeItem(lookup, msb, lsb);
+  }
+
+  public async addSignalByNameToDocument(signalName: string) {
+
+    if (!this.lastActiveDocument) {return;}
+    const document = this.lastActiveDocument;
+    const queued = this.beginAdd(document); // vscode-port: coalesced with adds arriving together
+    try {
+      await this.addSignalByName(document, signalName, queued);
+    } finally { queued(null); }
+  }
+
+  private async addSignalByName(document: VaporviewDocument, signalName: string, queued: (netlistId: NetlistId | null) => void) { // vscode-port: body of addSignalByNameToDocument
+    const metadata = await this.getNetlistItemFromSignalName(document, signalName);
+
+    if (metadata === null) {
+      // console.log('Signal not found ' + instancePath);
+      vscode.window.showWarningMessage('Signal not found: ' + signalName);
+      return;
+    }
+
+    // If it's a scope item, we just reveal it in the tree view
+    if (metadata.contextValue === 'netlistScope') {
+      this.netlistView.reveal(metadata, {select: true, focus: false, expand: 0});
+      return;
+    }
+
+    //console.log('found signal ' + instancePath);
+    const netlistId = metadata.netlistId;
+    const displayedNetlistIds = document.getDisplayedNetlistIds();
+    const isDisplayed = displayedNetlistIds.includes(netlistId);
+
+    if (isDisplayed) {
+      document.revealSignalInWebview(netlistId);
+    } else {
+      queued(netlistId); // vscode-port: was renderSignals([netlistId]) per call
+    }
+  }
+
+  // vscode-port: single adds (waveformViewer.addVariable, Add Variable by Path, terminal links) that overlap go to the
+  // page as one renderSignals (one render, one data request) instead of one each: 100 API adds took ~1 s against
+  // ~0.15 s for one batch. Each add takes a slot when it starts, so rows keep the order the calls were made in, and
+  // the batch goes once no add for that viewer is still looking its variable up and none came for ADD_QUIET_MS.
+  private addQueues = new Map<VaporviewDocument, AddQueue>();
+  private beginAdd(document: VaporviewDocument): (netlistId: NetlistId | null) => void {
+    let q = this.addQueues.get(document);
+    const at = Date.now();
+    if (!q) { q = { slots: [], inFlight: 0, firstAt: at, lastAt: at, gap: 0, timer: undefined }; this.addQueues.set(document, q); }
+    const queue = q;
+    queue.gap = Math.max(queue.gap, at - queue.lastAt); // widest gap between adds of this batch so far
+    queue.lastAt = at;
+    if (queue.timer) { clearTimeout(queue.timer); queue.timer = undefined; }
+    const slot = queue.slots.length;
+    queue.slots.push(null);
+    queue.inFlight++;
+    let done = false;
+    return (netlistId) => {
+      if (done) { return; }
+      done = true;
+      queue.slots[slot] = netlistId;
+      queue.inFlight--;
+      if (queue.inFlight > 0) { return; }
+      // A caller awaiting each command (for ... await addVariable) sends the next one a few ticks later, and later
+      // still on a loaded host: wait twice the widest gap seen in this batch (ADD_QUIET_MS..ADD_QUIET_MAX_MS) for it,
+      // but never hold the first add longer than ADD_MAX_WAIT_MS.
+      const quiet = Math.min(ADD_QUIET_MAX_MS, Math.max(ADD_QUIET_MS, 2 * queue.gap));
+      const wait = Date.now() - queue.firstAt >= ADD_MAX_WAIT_MS ? 0 : quiet;
+      if (queue.timer) { clearTimeout(queue.timer); }
+      queue.timer = setTimeout(() => this.flushAdds(document, queue), wait);
+    };
+  }
+  private flushAdds(document: VaporviewDocument, queue: AddQueue) {
+    queue.timer = undefined;
+    if (queue.inFlight !== 0 || this.addQueues.get(document) !== queue) { return; }
+    this.addQueues.delete(document);
+    const ids = [...new Set(queue.slots.filter((x): x is NetlistId => x !== null))];
+    if (ids.length) { document.renderSignals(ids, [], undefined, true); }
+  }
+
+  public revealSignalInWebview(netlistId: NetlistId) {
+    if (!this.activeDocument) {return;}
+    const document = this.activeDocument;
+    document.revealSignalInWebview(netlistId);
+  }
+
+  public async addVariableByInstancePathToDocument(e: AddVariableByPathArgs | undefined) {
+    if (e === undefined || e.instancePath === undefined) { // Executed from the command palette
+      vscode.window.showInputBox({
+        prompt: 'Enter variable name',
+        placeHolder: 'top.mid.var'
+      }).then(userInput => {
+        if (userInput !== undefined && userInput !== '') {
+          this.addSignalByNameToDocument(`${userInput}`);
+        }
+      });
+      return;
+    }
+    this.addSignalByNameToDocument(e.instancePath);
+  }
+
+  public searchNetlist(e: NetlistItem | undefined) {
+    const document = this.activeDocument;
+    let scopeId: number | undefined;
+    if (!document) {return;}
+    if (e) {scopeId = e.netlistId;}
+    this.quickPick.show(document, scopeId);
+  }
+
+  public async addAllInScopeToDocument(e: NetlistItem, recursive: boolean, maxChildren: number) {
+    if (!this.activeDocument) {return;}
+    const document = this.activeDocument;
+    
+    if (e === undefined) { // Executed from the command palette
+      vscode.window.showInputBox({
+        prompt: 'Enter scope name',
+        placeHolder: 'top.mid.scope'
+      }).then(userInput => {
+        if (userInput !== undefined && userInput !== '') {
+          this.addChildVariablesToDocumentByName(`${userInput}`, recursive, maxChildren);
+        }
+      });
+      return;
+    }
+    if (e.collapsibleState === vscode.TreeItemCollapsibleState.None) {return;}
+    this.addChildVariablesToDocument(document, e, recursive, maxChildren);
+  }
+
+  public async addChildVariablesToDocumentByName(name: string, recursive: boolean, maxChildren: number) {
+    if (!this.activeDocument) {return;}
+    const document = this.activeDocument;
+    const netlistItem = await document.findTreeItem(name, undefined, undefined);
+    if (netlistItem === null || netlistItem.contextValue !== 'netlistScope') {
+      vscode.window.showWarningMessage('Scope not found: ' + name);
+      return;
+    }
+    this.addChildVariablesToDocument(document, netlistItem, recursive, maxChildren);
+  }
+
+  public async addChildVariablesToDocument(document: VaporviewDocument, netlistItem: NetlistItem, recursive: boolean, maxChildren: number, noWarning: boolean = false) {
+
+    if (netlistItem.contextValue !== 'netlistScope') {return;}
+
+    const netlistVariables: NetlistItem[] = [];
+    const netlistScopes: NetlistItem[] = [netlistItem];
+
+    while (netlistScopes.length > 0 && netlistVariables.length < maxChildren) {
+
+      const parentScope = netlistScopes.shift();
+      const children = await document.getScopeChildren(parentScope);
+      children.forEach((element) => {
+        // vscode-port: rows already shown are skipped, so they count neither toward maxChildren nor the large-add warning
+        if (element.contextValue === 'netlistVar' && document.filterNewSignals([element.netlistId]).length) {
+          netlistVariables.push(element);
+        }
+        else if (element.contextValue === 'netlistScope' && recursive) {
+          netlistScopes.push(element);
+        }
+      });
+    }
+
+    this.filterAddSignalsInNetlist(netlistVariables, noWarning);
+  }
+
+  public filterAddSignalsInNetlist(netlistElements: NetlistItem[], noWarning: boolean = false) {
+
+    const document = this.activeDocument;
+    if (!document) {return;}
+
+    const elementList = document.filterNewSignals(netlistElements.filter((element) => { // vscode-port: shown rows don't count
+      return element.contextValue === 'netlistVar';
+    }).map((element) => element.netlistId));
+
+    if ((elementList.length > 48) && !noWarning) {
+      // show warning message
+      vscode.window.showWarningMessage('You are about to add a large number of signals to the waveform viewer. This may cause performance issues. Do you want to continue?', 'Yes', 'No').then((response) => {
+        if (response === 'Yes') {
+          document.renderSignals(elementList, [], undefined);
+        } 
+      });
+    } else {
+      document.renderSignals(elementList, [], undefined);
+    }
+  }
+
+  public removeSignalFromDocument(netlistId: NetlistId | undefined, rowId: number | undefined, removeAllSelected: boolean) {
+    if (!this.activeDocument) {return;}
+    if (!this.activeWebview?.visible) {return;}
+
+    this.activeDocument.removeSignalFromWebview(netlistId, rowId, removeAllSelected);
+  }
+
+  public removeSignalList(signalList: NetlistItem[]) {
+    if (!this.activeWebview) {return;}
+    if (!this.activeDocument) {return;}
+    if (!this.activeWebview.visible) {return;}
+
+    signalList.forEach((element) => {
+      if (element.contextValue !== 'netlistVar') {return;}
+      this.activeDocument?.removeSignalFromWebview(element.netlistId, undefined, false);
+    });
+  }
+
+  public newSignalGroup(
+    name: string | undefined,
+    groupPath: string[] | undefined,
+    parentGroupId: number | undefined,
+    eventRowId: number | undefined,
+    moveSelected: boolean,
+  ) {
+    if (!this.activeWebview) {return;}
+    if (!this.activeDocument) {return;}
+    if (!this.activeWebview.visible) {return;}
+
+    const panel = this.activeWebview;
+    panel.webview.postMessage({
+      command: 'newSignalGroup',
+      groupName: name,
+      groupPath: groupPath,
+      parentGroupId: parentGroupId,
+      eventRowId: eventRowId,
+      moveSelected: moveSelected,
+      showRenameInput: true,
+    });
+  }
+
+  public newSeparator(
+    name: string | undefined,
+    groupPath: string[] | undefined,
+    parentGroupId: number | undefined,
+    eventRowId: number | undefined
+  ) {
+    if (!this.activeWebview) {return;}
+    if (!this.activeDocument) {return;}
+    if (!this.activeWebview.visible) {return;}
+
+    const panel = this.activeWebview;
+    panel.webview.postMessage({
+      command: 'add-separator',
+      name: name,
+      groupPath: groupPath,
+      parentGroupId: parentGroupId,
+      eventRowId: eventRowId
+    });
+  }
+
+  public newSignalFromBitRange(
+    name: string | undefined,
+    groupPath: string[] | undefined,
+    parentGroupId: number | undefined,
+    eventRowId: number | undefined,
+    bitRangeString: string | undefined,
+  ) {
+    if (!this.activeWebview) {return;}
+    if (!this.activeDocument) {return;}
+    if (!this.activeWebview.visible) {return;}
+
+    // check that bitRangeString is valid
+    const bitRangeRegex = /^(\d+)(:(\d+))?$/;
+    if (bitRangeString === undefined || !bitRangeRegex.test(bitRangeString)) {
+      vscode.window.showWarningMessage('Invalid bit range string: ' + bitRangeString);
+      return;
+    } else {
+      const msb = parseInt(bitRangeString.split(':')[0]);
+      let lsb = msb;
+      if (bitRangeString.includes(':')) {
+        lsb = parseInt(bitRangeString.split(':')[1]);
+      }
+      const panel = this.activeWebview;
+      panel.webview.postMessage({
+        command: 'add-bit-slice',
+        name: name,
+        groupPath: groupPath,
+        parentGroupId: parentGroupId,
+        eventRowId: eventRowId,
+        msb: msb,
+        lsb: lsb,
+      });
+    }
+  }
+
+  public createSignalsForAllBits(name: string | undefined, groupPath: string[] | undefined, parentGroupId: number | undefined, eventRowId: number | undefined, bitWidth: number) {
+    if (!this.activeWebview) {return;}
+    if (!this.activeDocument) {return;}
+    if (!this.activeWebview.visible) {return;}
+
+    const panel = this.activeWebview;
+    panel.webview.postMessage({
+      command: 'add-all-bit-slices',
+      name: name,
+      groupPath: groupPath,
+      parentGroupId: parentGroupId,
+      eventRowId: eventRowId,
+      bitWidth: bitWidth,
+    });
+  }
+
+  public renameSignalGroup(e: RenameSignalGroupArgs | undefined) {
+    if (!this.activeWebview) {return;}
+    if (!this.activeDocument) {return;}
+    if (!this.activeWebview.visible) {return;}
+
+    const groupId: number | undefined = e?.groupId;
+    const groupName: string | undefined = e?.name;
+    const rowId: number | undefined = e?.rowId;
+
+    const panel = this.activeWebview;
+    panel.webview.postMessage({
+      command: 'renameSignalGroup',
+      rowId: rowId,
+      groupId: groupId,
+      groupName: groupName,
+    });
+  }
+
+  public editSignalGroup(groupId: number | undefined, groupPath: string[] | undefined, name: string | undefined, isExpanded: boolean | undefined) {
+
+    if (!this.activeWebview) {return;}
+    if (!this.activeDocument) {return;}
+    if (!this.activeWebview.visible) {return;}
+
+    const panel = this.activeWebview;
+    panel.webview.postMessage({
+      command: 'editSignalGroup',
+      groupId: groupId,
+      groupPath: groupPath,
+      name: name,
+      isExpanded: isExpanded,
+    });
+  }
+
+  public deleteSignalGroup(e: SignalGroupWebviewContext | undefined, recursive: boolean) {
+    if (!this.activeWebview) {return;}
+    if (!this.activeDocument) {return;}
+    if (!this.activeWebview.visible) {return;}
+
+    const groupId: number | undefined = e?.groupId;
+
+    const panel = this.activeWebview;
+    panel.webview.postMessage({
+      command: 'remove-group',
+      groupId: groupId,
+      recursive: recursive,
+    });
+  }
+
+  public removeSeparator(rowId: number, removeAllSelected: boolean) {
+    if (!this.activeWebview) {return;}
+    if (!this.activeDocument) {return;}
+    if (!this.activeWebview.visible) {return;}
+
+    const panel = this.activeWebview;
+    panel.webview.postMessage({
+      command: 'remove-separator',
+      rowId: rowId,
+      removeAllSelected: removeAllSelected
+    });
+  }
+
+  public setValueFormat(commandArgs: { netlistId?: NetlistId; rowId?: number } | undefined, index: number | undefined, properties: DisplayFormatProperties) {
+    if (!this.activeWebview) {return;}
+    if (!this.activeDocument) {return;}
+    if (!this.activeWebview.visible) {return;}
+
+    //const document    = this.activeDocument;
+    //const netlistData = document.netlistIdTable[netlistId];
+    //if (netlistData) {
+    //  if (format !== undefined) {
+    //    netlistData.numberFormat = format;
+    //  }
+    //}
+
+    const panel     = this.activeWebview;
+    const format    = properties.valueFormat;
+    const netlistId = commandArgs === undefined ? undefined : commandArgs.netlistId;
+    const rowId     = commandArgs === undefined ? undefined : commandArgs.rowId;
+
+    panel.webview.postMessage({
+      command: 'setDisplayFormat',
+      netlistId: netlistId,
+      index: index,
+      rowId: rowId,
+      numberFormat: format,
+      colorIndex: properties.colorIndex,
+      renderType: properties.renderType,
+      rowHeight: properties.rowHeight,
+      verticalScale: properties.verticalScale,
+      nameType: properties.nameType,
+      customName: properties.customName,
+      valueLinkEnable: properties.valueLinkEnable,
+      annotateValue: properties.annotateValue,
+    } as SetDisplayFormatMessage);
+  }
+
+  copyValueAtMarker(e: { rowId?: number }) {
+    if (e.rowId === undefined) {return;}
+    if (!this.activeWebview) {return;}
+    if (!this.activeDocument) {return;}
+    if (!this.activeWebview.visible) {return;}
+
+    this.activeWebview.webview.postMessage({
+      command: 'copyValueAtMarker',
+      rowId: e.rowId,
+    });
+  }
+
+  public setDefaultPixelTime(e: RulerWebviewContext | undefined, increment: string | undefined) {
+    let document: VaporviewDocument | undefined;
+
+    if (!this.lastActiveWebview) {return;}
+    if (!this.lastActiveDocument) {return;}
+    if (e !== undefined) {
+      document = this.documentCollection.get(e.documentId);
+    }
+    if (!document) {
+      document = this.lastActiveDocument;
+    }
+
+    let pixelTime = 0;
+    let timeScale = 1;
+    if (increment !== undefined) {
+      const [time, units] = increment.split(' ');
+      if (time === undefined) {return;}
+      const timeValue = parseFloat(time);
+      if (units !== undefined) {
+        const scale        = logScaleFromUnits(units);
+        const defaultScale = logScaleFromUnits(document.metadata.timeUnit);
+        timeScale          = 10 ** (scale - defaultScale);
+      }
+      pixelTime = timeValue * timeScale;
+    }
+    document.webviewPanel?.webview.postMessage({command: 'updateRulerSettings', pixelTime: pixelTime});
+  }
+
+  // To do: implement nonce with this HTML:
+  //<script nonce="${nonce}" src="${scriptUri}"></script>
+  private getHtmlContent(webview: vscode.Webview): string {
+
+    const extensionUri = this._context.extensionUri;
+    const htmlFile     = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', 'webview.html'));
+    const svgIconsUri  = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'src', 'webview', 'icons.svg'));
+    const jsFileUri    = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'dist', 'webview.js'));
+    const cssFileUri   = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', 'style.css'));
+    const codiconsUri  = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'node_modules', '@vscode', 'codicons', 'dist', 'codicon.css'));
+    let htmlContent    = fs.readFileSync(htmlFile.fsPath, 'utf8');
+
+    htmlContent = htmlContent.replace('${webAssets.svgIconsUri}', svgIconsUri.toString());
+    htmlContent = htmlContent.replace('${webAssets.jsFileUri}', jsFileUri.toString());
+    htmlContent = htmlContent.replace('${webAssets.cssFileUri}', cssFileUri.toString());
+    htmlContent = htmlContent.replace('${webAssets.codiconsUri}', codiconsUri.toString());
+    htmlContent = injectCmuxScripts(htmlContent, webview, extensionUri); // vscode-port: cmux page modules + bridge
+
+    return htmlContent;
+  }
+
+  // onDidChangeSelection() event returns readonly elements
+  // so we need to copy the selected elements to a new array
+  // Six one way, half a dozen the other. One is just more concise...
+  private handleNetlistViewSelectionChanged = (e: vscode.TreeViewSelectionChangeEvent<NetlistItem>) => {
+
+    const uri = this.activeDocument?.uri;
+    this.netlistTreeDataProvider.handleSelectionChanged(e, uri);
+  };
+
+  private handleNetlistCollapseElement = (e: vscode.TreeViewExpansionEvent<NetlistItem>) => {
+    if (!this.lastActiveWebview?.visible) {return;}
+    if (e.element.collapsibleState === vscode.TreeItemCollapsibleState.None) {return;}
+    e.element.collapsibleState = vscode.TreeItemCollapsibleState.Collapsed;
+  };
+
+  private handleNetlistExpandElement = (e: vscode.TreeViewExpansionEvent<NetlistItem>) => {
+    if (!this.lastActiveWebview?.visible) {return;}
+    if (e.element.collapsibleState === vscode.TreeItemCollapsibleState.None) {return;}
+    e.element.collapsibleState = vscode.TreeItemCollapsibleState.Expanded;
+  };
+}

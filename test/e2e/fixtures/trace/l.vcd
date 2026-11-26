@@ -1,0 +1,48 @@
+$date
+	neutralised
+$end
+$version
+	Icarus Verilog
+$end
+$timescale
+	1ns
+$end
+$scope module tb_l $end
+$var wire 2 ! v [1:0] $end
+$var reg 2 " c [1:0] $end
+$var reg 2 # en [1:0] $end
+$scope module dut $end
+$var wire 2 $ c [1:0] $end
+$var wire 2 % en [1:0] $end
+$var reg 2 ' v [1:0] $end
+$scope begin $ivl_for_loop0 $end
+$var reg 32 ( i [31:0] $end
+$upscope $end
+$upscope $end
+$upscope $end
+$enddefinitions $end
+$dumpall
+$end
+#0
+$dumpvars
+b10 (
+b0 '
+b11 %
+b0 $
+b11 #
+b0 "
+b0 !
+$end
+#10
+b10 !
+b10 '
+b10 (
+b10 "
+b10 $
+#20
+b10 (
+b0 !
+b0 '
+b1 #
+b1 %
+#30

@@ -1,0 +1,32 @@
+wisp-helper: the waveform reader bundled with VaporView FSDB (reads FSDB and WCZ files)
+Copyright (c) 2026 Ansh Tulsyan
+Licensed under the MIT License (LICENSE). First-party source files carry an SPDX-License-Identifier: MIT line.
+
+Where the code came from: every first-party file here (helper/, include/, convert/fsdb/) was written for the WCZ
+project by its authors and is not derived from another project, except for the third-party code listed below,
+which is kept with its original headers under its own terms. No vendor software, headers or libraries are included,
+linked or loaded: FSDB files are decoded by the code in convert/fsdb/.
+
+This directory is the exact source of the wisp-helper binaries in the VaporView FSDB 0.1.0 VSIX files
+(archi-max/wcz commit c407403cba51abafdd6c88541605d40cb8232542, no patches; build id 7cde573ac63ad956). It holds
+the files the helper build compiles, plus its build scripts (Makefile, helper/build.sh), documents and checks.
+
+Files with no SPDX line (licence texts, documents, word lists) are covered by this notice, MIT:
+  LICENSE, NOTICE, helper/NOTICE, helper/README.md, helper/SOURCES.txt,
+  convert/fsdb/side/proven-words.txt, convert/fsdb/side/window-safe-words.txt,
+  vectors/accept/a01-min.wcz (a WCZ conformance vector made by the WCZ project's own generator from synthetic changes;
+  no recorded design, no dump from any other tool)
+
+Third-party code in this directory:
+  helper/lib/third_party/zstd/
+    The zstd decompressor (zstd 1.5.7, unmodified files), Copyright (c) Meta Platforms, Inc. and affiliates; its
+    lib/common/xxhash.h is Copyright (c) Yann Collet. zstd is dual-licensed BSD-3-Clause or GPL-2.0 and is used here
+    under BSD-3-Clause: helper/lib/third_party/zstd/LICENSE.
+
+Algorithms and libraries used, not included:
+  xxHash: include/wcz_base.h implements the XXH64 hash algorithm (Copyright (c) 2012-2021 Yann Collet,
+    BSD-2-Clause, for any part derived from the xxHash reference code).
+  zlib (Copyright (c) Jean-loup Gailly and Mark Adler; zlib licence): linked at build time. The Linux release
+    binary links zlib 1.3.1 statically; macOS uses the system libz.
+  The C++ runtime: the Linux release binary links LLVM libc++, libc++abi and libunwind statically (Apache-2.0 WITH
+    LLVM-exception); macOS uses the system libc++. The VSIX's THIRD-PARTY-NOTICES.txt carries these licence texts.

@@ -1,0 +1,49 @@
+// wit/filehandler.wit
+package vaporview:fileparser;
+
+interface types {
+
+  record scopeitem {
+    name: string,
+    id: string,
+    tpe: string
+  }
+}
+
+world filehandler {
+	//use types.{ operation };
+	use types.{scopeitem };
+
+	import log: func(msg: string);
+  import outputlog: func(msg: string);
+	// Zero-copy file read: the Worker thread handles this locally without IPC.
+	// For local files it calls fs.readSync; for workspace/virtual-FS files it reads
+	// from a pre-loaded in-memory buffer sent via a setup-file message before loadfile.
+	// `ptr` is a raw WASM linear-memory address; the host writes `length` bytes there
+	// and returns the number of bytes actually written.
+	import fsreadptr: func(fd: u32, offset: u64, ptr: u32, length: u32) -> u32;
+	import getsize: func(fd: u32) -> u64;
+	import setscopetop: func(name: string, id: u32, tpe: string);
+  import setvartop: func(name: string, id: u32, signalid: u32, tpe: string, encoding: string, width: u32, msb: s32, lsb: s32, enumtype: string);
+  import setmetadata: func (scopecount: u32, varcount: u32, timescale: u32, timeunit: string);
+  import setchunksize: func(chunksize: u64, timeend: u64, timetablelength: u64);
+	import sendtransitiondatachunk: func(signalid: u32, totalchunks: u32, chunknum: u32, min: f64, max: f64, data: string);
+  import sendenumdata: func(name: string, totalchunks: u32, chunknum: u32, data: string);
+  import sendcompressedtransitiondata: func(signalid: u32, signalwidth: u32, totalchunks: u32, chunknum: u32, min: f64, max: f64, compresseddata: list<u8>, originalsize: u32);
+
+	export loadfile: func(size: u64, fd: u32, loadstatic: bool, buffersize: u32);
+  export readbody: func();
+  export unload: func();
+
+  // wit2ts seems to have issues returning lists of custom types
+  // so we will convert to JSON string
+  export getparametervalues: func(signalidlist: list<u32>) -> string;
+  export getchildren: func(id: u32, startindex: u32) -> string;
+  export getsignaldata: func(signalidlist: list<u32>);
+  export getenumdata: func(netlistidlist: list<u32>);
+  export getvaluesattime: func(time: u64, paths: string) -> string;
+  export searchnetlist: func(searchquery: string, scopeid: u32) -> string;
+
+  export loadremotestatus: func(status: list<u8>) -> string;
+  export loadremotechunk: func(chunk-type: u32, chunk-data: list<u8>, chunk-index: u32, total-chunks: u32);
+}

@@ -1,0 +1,4 @@
+{
+  "folders": [{ "path": "link" }],
+  "settings": { "vaporview.sourceLink.elaborate": "always" }
+}

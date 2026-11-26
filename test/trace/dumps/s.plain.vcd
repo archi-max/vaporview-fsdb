@@ -1,0 +1,499 @@
+$date
+	fixture
+$end
+
+$version
+	Verilog simulator
+$end
+
+$timescale
+	1ns
+$end
+
+$comment Csum: 1 b8f3f212bc40a2d8 $end
+
+
+$scope module tb_s $end
+$var reg 1 ! clk $end
+$var reg 1 " rst_n $end
+$var reg 1 # bad $end
+$var reg 1 $ sel $end
+$var reg 1 % en $end
+$var reg 1 & msel $end
+$var reg 8 ' ld [7:0] $end
+$var reg 8 ( nd_d [7:0] $end
+$var reg 8 ) nd_e [7:0] $end
+$var reg 8 * rd [7:0] $end
+$var reg 8 + ro [7:0] $end
+$var reg 8 , mask [7:0] $end
+$var reg 8 - md [7:0] $end
+$var reg 8 . a [7:0] $end
+$var reg 8 / b [7:0] $end
+$var reg 8 0 lq [7:0] $end
+$var reg 8 1 nq [7:0] $end
+$var reg 8 2 rq [7:0] $end
+$var reg 8 3 mrn [7:0] $end
+$var reg 8 4 mq [7:0] $end
+
+$scope module t_nd $end
+$var reg 1 5 clk $end
+$var reg 1 6 rst_n $end
+$var reg 1 7 sel $end
+$var reg 8 8 d [7:0] $end
+$var reg 8 9 e [7:0] $end
+$var reg 8 : q [7:0] $end
+$upscope $end
+
+
+$scope module t_lit $end
+$var reg 1 ; clk $end
+$var reg 1 < rst_n $end
+$var reg 1 = bad $end
+$var reg 8 > d [7:0] $end
+$var reg 8 ? q [7:0] $end
+$upscope $end
+
+
+$scope module t_rep $end
+$var reg 1 @ clk $end
+$var reg 1 A rst_n $end
+$var reg 1 B en $end
+$var reg 8 C d [7:0] $end
+$var reg 8 D o [7:0] $end
+$var reg 8 E q [7:0] $end
+$upscope $end
+
+
+$scope module t_mask $end
+$var reg 1 F clk $end
+$var reg 1 G rst_n $end
+$var reg 8 H mask [7:0] $end
+$var reg 8 I d [7:0] $end
+$var reg 8 J rn [7:0] $end
+$upscope $end
+
+
+$scope module t_mux $end
+$var reg 1 K clk $end
+$var reg 1 L sel $end
+$var reg 8 M a [7:0] $end
+$var reg 8 N b [7:0] $end
+$var reg 8 O q [7:0] $end
+$upscope $end
+
+$upscope $end
+
+$enddefinitions $end
+
+#0
+$dumpvars
+0#
+0!
+0%
+0&
+0"
+0$
+05
+06
+07
+b00000000 .
+b00000000 /
+b00000000 8
+b00000000 9
+b00000000 '
+bxxxxxxxx 0
+b11111111 ,
+b00000000 -
+bxxxxxxxx 4
+bxxxxxxxx 3
+b00000000 (
+b00000000 )
+bxxxxxxxx 1
+bxxxxxxxx :
+b00000000 *
+b00000000 +
+bxxxxxxxx 2
+b00000000 >
+bxxxxxxxx ?
+b00000000 C
+b00000000 D
+bxxxxxxxx E
+b00000000 I
+b11111111 H
+bxxxxxxxx J
+b00000000 M
+b00000000 N
+bxxxxxxxx O
+0;
+0@
+0F
+0K
+0<
+0A
+0G
+0=
+0B
+0L
+$end
+#5
+1!
+1;
+1@
+1F
+1K
+15
+b00000000 ?
+b00000000 0
+b00000000 E
+b00000000 2
+b00000000 J
+b00000000 3
+b00000000 O
+b00000000 4
+b00000000 :
+b00000000 1
+#10
+0!
+0;
+0@
+0F
+0K
+05
+#12
+b00000101 .
+b00000101 M
+#15
+1!
+1;
+1@
+1F
+1K
+15
+#20
+0!
+0;
+0@
+0F
+0K
+05
+#22
+1"
+1<
+1A
+1G
+16
+#25
+1!
+1;
+1@
+1F
+1K
+15
+#30
+0!
+0;
+0@
+0F
+0K
+05
+#32
+b0000000x '
+b0000000x >
+b0000000x (
+b0000000x 8
+b0000000x *
+b0000000x C
+b0000x000 -
+b0000x000 I
+#35
+1!
+1;
+1@
+1F
+1K
+15
+b0000000x ?
+b0000000x 0
+b0000000x E
+b0000000x 2
+b0000x000 J
+b0000x000 3
+b0000000x :
+b0000000x 1
+#40
+0!
+0;
+0@
+0F
+0K
+05
+#42
+b00000101 /
+b00000101 N
+b00000000 '
+b00000000 >
+b00000000 (
+b00000000 8
+b00000000 *
+b00000000 C
+b00000000 -
+b00000000 I
+#45
+1!
+1;
+1@
+1F
+1K
+15
+b00000101 O
+b00000101 4
+#50
+0!
+0;
+0@
+0F
+0K
+05
+#52
+1#
+1=
+1$
+17
+b000x0000 )
+b000x0000 9
+1%
+1B
+b0000000x +
+b0000000x D
+b00x00000 -
+b00x00000 I
+#55
+1!
+1;
+1@
+1F
+1K
+15
+bxxxx000x ?
+bxxxx000x 0
+b00x0x000 J
+b00x0x000 3
+b000x000x :
+b000x000x 1
+#60
+0!
+0;
+0@
+0F
+0K
+05
+#62
+0#
+0=
+0$
+07
+b00000000 )
+b00000000 9
+0%
+0B
+b00000000 +
+b00000000 D
+b00000000 -
+b00000000 I
+#65
+1!
+1;
+1@
+1F
+1K
+15
+#70
+0!
+0;
+0@
+0F
+0K
+05
+#72
+b11011111 ,
+b11011111 H
+#75
+1!
+1;
+1@
+1F
+1K
+15
+b0000x000 J
+b0000x000 3
+#80
+0!
+0;
+0@
+0F
+0K
+05
+#82
+b11111111 ,
+b11111111 H
+#85
+1!
+1;
+1@
+1F
+1K
+15
+#90
+0!
+0;
+0@
+0F
+0K
+05
+#95
+1!
+1;
+1@
+1F
+1K
+15
+#100
+0!
+0;
+0@
+0F
+0K
+05
+#105
+1!
+1;
+1@
+1F
+1K
+15
+#110
+0!
+0;
+0@
+0F
+0K
+05
+#115
+1!
+1;
+1@
+1F
+1K
+15
+#120
+0!
+0;
+0@
+0F
+0K
+05
+#125
+1!
+1;
+1@
+1F
+1K
+15
+#130
+0!
+0;
+0@
+0F
+0K
+05
+#135
+1!
+1;
+1@
+1F
+1K
+15
+#140
+0!
+0;
+0@
+0F
+0K
+05
+#145
+1!
+1;
+1@
+1F
+1K
+15
+#150
+0!
+0;
+0@
+0F
+0K
+05
+#155
+1!
+1;
+1@
+1F
+1K
+15
+#160
+0!
+0;
+0@
+0F
+0K
+05
+#165
+1!
+1;
+1@
+1F
+1K
+15
+#170
+0!
+0;
+0@
+0F
+0K
+05
+#175
+1!
+1;
+1@
+1F
+1K
+15
+#180
+0!
+0;
+0@
+0F
+0K
+05
+#185
+1!
+1;
+1@
+1F
+1K
+15
+#190
+0!
+0;
+0@
+0F
+0K
+05
+#195
+1!
+1;
+1@
+1F
+1K
+15

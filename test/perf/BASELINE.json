@@ -1,0 +1,61 @@
+{
+  "about": "Perf tolerances for the e2e perf checks (bridge-perf, link-perf, dbg-perf, wisp-mem). Each check measures its own baseline in the same run, or compares with the per-platform p95 recorded here.",
+  "tolerances": {
+    "memory": {
+      "ratio": 1.1,
+      "extHostAbsKB": 20000
+    }
+  },
+  "bridge.signalChanges": {
+    "check": "test/e2e/suite/bridge-perf.test.cjs",
+    "factor": 1.5,
+    "slackMs": 100
+  },
+  "bridge.posedges": {
+    "check": "test/e2e/suite/bridge-perf.test.cjs",
+    "factor": 1.5,
+    "slackMs": 50
+  },
+  "bridge.signalChanges.wisp": {
+    "check": "test/e2e/suite/bridge-perf.test.cjs (E2E_FORMAT=fsdb|wcz)",
+    "factor": 1.5,
+    "slackMs": 100
+  },
+  "bridge.posedges.wisp": {
+    "check": "test/e2e/suite/bridge-perf.test.cjs (E2E_FORMAT=fsdb|wcz)",
+    "factor": 1.5,
+    "slackMs": 50
+  },
+  "link.inlineValues": {
+    "check": "test/e2e/suite/link-perf.test.cjs",
+    "factor": 1.5,
+    "slackMs": 20,
+    "byPlatform": {
+      "darwin": {
+        "p50Ms": 5.8,
+        "p95Ms": 12.9
+      },
+      "linux": {
+        "p50Ms": 9,
+        "p95Ms": 49.3
+      },
+      "linux-fsdb": {
+        "p50Ms": 17.5,
+        "p95Ms": 35.8
+      },
+      "linux-wcz": {
+        "p50Ms": 42.0,
+        "p95Ms": 137.4
+      }
+    }
+  },
+  "dbg.stepLatency": {
+    "check": "test/e2e/suite/dbg-perf.test.cjs",
+    "factor": 1.5,
+    "slackMs": 20,
+    "byPlatform": {}
+  },
+  "memory": {
+    "records": null
+  }
+}

@@ -1,0 +1,45 @@
+VaporView FSDB
+VaporView FSDB is a fork of VaporView that reads FSDB and WCZ with its bundled reader (wisp-helper) and adds
+waveform debugging and driver tracing in VS Code. Not affiliated with or endorsed by the VaporView project or its author.
+
+Licence: GNU General Public License v3.0 (LICENSE). The extension as a whole is distributed under GPL-3.0.
+
+Copyright and origin of the code in this extension
+--------------------------------------------------
+- VaporView (https://github.com/lramseyer/vaporview), GPL-3.0, Copyright (c) Lloyd Ramseyer and contributors.
+  This extension is based on VaporView 1.6.1-beta (commit 59107c6). Files changed for the fork carry a
+  "vscode-port:" comment at each change.
+- cmux waveform modules (media/cmux/, src/cmux/: debugger, expressions, trace, formats, machine state, bridge),
+  GPL-3.0-or-later, Copyright (c) 2024-present Manaflow, Inc. and contributors. Ported from cmux's VaporView
+  integration; each file names its source.
+  Code adapted or reimplemented inside those modules, credited as in cmux:
+    - slang (https://github.com/MikePopoloski/slang), MIT: SystemVerilog expression semantics (reimplemented).
+    - riscv-formal (https://github.com/YosysHQ/riscv-formal), ISC: the RVFI signal names.
+    - Compiler Explorer (https://github.com/compiler-explorer/compiler-explorer), BSD-2-Clause: the objdump
+      listing parser (ported).
+- wellen (https://github.com/ekiwi/wellen), BSD-3-Clause, Copyright (c) Kevin Laeufer and contributors: the VCD,
+  FST and GHW reader compiled into filehandler.wasm.
+
+The optional upstream FSDB addon source (fsdb_reader.cpp) is not included; see upstream VaporView.
+
+Programs shipped in platform packages (bin/<platform>/)
+-------------------------------------------------------
+- wisp-helper: the FSDB/WCZ reader, distributed as a prebuilt binary (its source is not part of this repository),
+  MIT, Copyright (c) 2026 Ansh Tulsyan. It reads FSDB files with its own decoder; it contains no Synopsys/Verdi code
+  and loads no vendor library. Statically linked: zstd's decompressor (BSD-3-Clause), zlib (Zlib licence) and the
+  LLVM C++ runtime (libc++, libc++abi, libunwind; Apache-2.0 WITH LLVM-exception). bin/<platform>/wisp-helper.buildinfo
+  names its build id, target and toolchain.
+- cmux-sv-model (when a platform package ships it prebuilt): the design model for driver tracing, built from
+  media/cmux/sv-model/ (GPL-3.0-or-later) on slang 12.1 (MIT) with fmt (MIT), Boost.Regex (BSL-1.0) and
+  toml++ (MIT). Without a prebuilt copy it is built on first use from the same sources (see media/cmux/sv-model/
+  build.sh, which keeps slang's notice).
+
+Verdi
+-----
+No Synopsys/Verdi file is part of this extension. Verdi-based features (the optional Verdi cross-check in Trace
+Driver) run the user's own Verdi installation, under the user's own Verdi licence, and start only when the user asks.
+
+Third-party licence texts
+-------------------------
+THIRD-PARTY-NOTICES.txt, generated from the contents of each package by tools/gen-notices.mjs, reproduces the
+licence of every bundled npm package, every Rust crate compiled into filehandler.wasm and every native component.

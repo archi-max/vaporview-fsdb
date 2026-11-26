@@ -1,0 +1,33 @@
+src/**
+target/**
+!target/wasm32-unknown-unknown/release/filehandler.wasm
+readme_assets/**
+.vscode/**
+.gitignore
+.DS_Store
+node_modules/**
+!node_modules/@vscode/codicons/**
+out/**/*.map
+# vscode-port: the link unit tests compile here (npm run test:link-unit); never shipped
+out/link-test/**
+dist/**/*.map
+wit/**
+*.vsix
+toDo*
+Cargo.*
+.*/**
+# vscode-port: dev-only files never ship (tools/check-vsix.sh enforces it)
+tools/**
+test/**
+packages/**
+dist-vsix/**
+bin/**/.DS_Store
+CONTRIBUTING.md
+esbuild.js
+tsconfig*.json
+webpack.config*.js
+binding.gyp
+.eslintignore
+.eslintrc*
+release/**
+wisp-helper/**

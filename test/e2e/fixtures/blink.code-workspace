@@ -1,0 +1,4 @@
+{
+  "folders": [{ "path": "link" }, { "path": "multiroot/dbg" }],
+  "settings": { "vaporview.sourceLink.elaborate": "always" }
+}

@@ -1,0 +1,7 @@
+/* vscode-port: where the cmux modules' panes go in the VS Code webview (cmux put them beside its viewer iframe). GPL-3.0. */
+#panes { position: fixed; top: 0; right: 0; bottom: 0; display: flex; z-index: 20; pointer-events: none;
+  background: var(--vscode-editor-background); }
+#panes > * { pointer-events: auto; }
+#panes:empty, #panes:not(:has(> :not([hidden]))) { display: none; }
+#panes #fsm { width: 340px; height: 100%; }
+#viewer[hidden] { display: none; }

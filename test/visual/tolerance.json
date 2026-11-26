@@ -1,0 +1,48 @@
+{
+  "_doc": "channel: max per-channel delta (0-255) for a pixel to count as equal; maxRatio: max fraction of differing pixels. Never loosen to make a run pass; look at out/<name>.diff.png first.",
+  "default": {
+    "channel": 24,
+    "maxRatio": 0.001
+  },
+  "hold": [],
+  "_hold_doc": "hold: regexes of shots reviewed but not yet approved (reported VISUAL HOLD). Empty since trace TR1-TR5 merged. verdi-notice stays a harness limit (modal refused in tests, SKIP).",
+  "nameMasks": {
+    "_doc": "Applied only when the shots were taken on a format other than fsdb (out*/.format, written by shot.cjs): the dump's file name shows in the title bar and editor tabs, and in the dbg-break call stack. One baseline set (from FSDB) serves every format, so any other pixel change still fails. Rects are inclusive pixel boxes {x0,y0,x1,y1}.",
+    "linux": {
+      "*": [
+        {
+          "x0": 0,
+          "y0": 0,
+          "x1": 1599,
+          "y1": 62
+        }
+      ],
+      "dbg-break-dark": [
+        {
+          "x0": 214,
+          "y0": 688,
+          "x1": 300,
+          "y1": 712
+        }
+      ]
+    },
+    "mac": {
+      "*": [
+        {
+          "x0": 0,
+          "y0": 0,
+          "x1": 1439,
+          "y1": 66
+        }
+      ],
+      "dbg-break-dark": [
+        {
+          "x0": 214,
+          "y0": 580,
+          "x1": 302,
+          "y1": 600
+        }
+      ]
+    }
+  }
+}

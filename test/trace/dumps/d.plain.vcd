@@ -1,0 +1,148 @@
+$date
+	fixture
+$end
+
+$version
+	Verilog simulator
+$end
+
+$timescale
+	1ns
+$end
+
+$comment Csum: 1 a75ac9e4b6f855d0 $end
+
+
+$scope module tb_d $end
+$var reg 1 ! clk $end
+$var reg 1 " rst_n $end
+$var reg 1 # xs $end
+$var reg 4 $ d [3:0] $end
+$var reg 4 % q4 [3:0] $end
+$var reg 4 & q5 [3:0] $end
+
+$scope module dut $end
+$var reg 1 ' clk $end
+$var reg 1 ( rst_n $end
+$var reg 1 ) xs $end
+$var reg 4 * d [3:0] $end
+$var reg 4 + q4 [3:0] $end
+$var reg 4 , q5 [3:0] $end
+
+$scope begin unnamed$$_0 $end
+$var reg 4 - p4 [3:0] $end
+$upscope $end
+
+
+$scope begin unnamed$$_1 $end
+$var reg 4 . t5 [3:0] $end
+
+$scope begin unnamed$$_2 $end
+$upscope $end
+
+$upscope $end
+
+$upscope $end
+
+$upscope $end
+
+$enddefinitions $end
+
+#0
+$dumpvars
+0!
+0(
+x)
+0"
+x#
+b0000 $
+b0000 *
+bxxxx +
+bxxxx ,
+bxxxx %
+bxxxx &
+bxxxx -
+bxxxx .
+0'
+$end
+#5
+1!
+1'
+b0000 -
+b1111 .
+b0001 +
+b0001 %
+b0000 ,
+b0000 &
+#10
+0!
+0'
+#15
+1!
+1'
+#20
+0!
+0'
+#22
+1"
+1(
+#25
+1!
+1'
+#30
+0!
+0'
+#32
+b0101 $
+b0101 *
+#35
+1!
+1'
+b0101 -
+b1010 .
+#40
+0!
+0'
+#42
+b1111 $
+b1111 *
+#45
+1!
+1'
+b1111 -
+b0000 .
+#50
+0!
+0'
+#52
+b0000 $
+b0000 *
+#55
+1!
+1'
+b0000 -
+b1111 .
+#60
+0!
+0'
+#65
+1!
+1'
+#70
+0!
+0'
+#75
+1!
+1'
+#80
+0!
+0'
+#85
+1!
+1'
+#90
+0!
+0'
+#95
+1!
+1'

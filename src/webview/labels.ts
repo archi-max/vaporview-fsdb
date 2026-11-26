@@ -1,0 +1,748 @@
+import { viewport, viewerState, dataManager, getIndexInGroup, handleClickSelection, rowHandler, vscodeWrapper, styles, dragController, revealSignal} from './vaporview';
+import { ActionType, type EventHandler } from './event_handler';
+import { ValueFormat } from './value_format';
+import { getParentGroupId } from './vaporview';
+import { SignalGroup, NetlistVariable, SignalItem, RowItem, htmlSafe, CustomVariable, SignalSeparator, SliceGroup, sliceGroupOf } from './signal_item'; // cmux: slices
+import { NetlistId, SignalId, type RowId, EnumData, EnumEntry, StateChangeType, NetlistVariableContext } from '../common/types';
+import { pushAll } from '../common/arrays'; // vscode-port
+
+interface IdleGroupEntry {
+  element: HTMLElement;
+  top: number;
+  bottom: number;
+  left: number;
+}
+
+export class LabelsPanels {
+
+  resizeElement: HTMLElement | null = null;
+  events: EventHandler;
+
+  webview: HTMLElement;
+  labels: HTMLElement;
+  valueDisplay: HTMLElement;
+  labelsScroll: HTMLElement;
+  valuesScroll: HTMLElement;
+  resize1: HTMLElement;
+  resize2: HTMLElement;
+
+  // drag handler variables
+  dragDivider: HTMLElement | null   = null;
+  dragCursorTag: HTMLElement | null = null;
+  dragCursorText: string            = "";
+  labelsList: string[]              = [];
+  idleItems: Element[]              = [];
+  idleGroups: IdleGroupEntry[]      = [];
+  draggableRows: RowId[]            = [];
+  draggableItem: HTMLElement | null = null;
+  closestItem: HTMLElement | null   = null;
+  groupContainer: HTMLElement | null = null;
+  indexOffset: number               = 0;
+  pointerStartX: number | null      = null;
+  pointerStartY: number | null      = null;
+  scrollStartY: number | null       = null;
+  resizeIndex: number | null        = null;
+  defaultDragDividerY: number       = 0;
+  dragActive: boolean               = false;
+  dragInProgress: boolean           = false;
+  dragFreeze: boolean               = true;
+  dragFreezeTimeout: ReturnType<typeof setTimeout> | null = null;
+
+  renameActive: boolean             = false;
+  valueAtMarker: Record<number, string[]> = {};
+  lastClickedSignal: RowId | null   = null;
+  lastClickedTime: number           = 0;
+
+  constructor(events: EventHandler) {
+    this.events = events;
+
+    const webview      = document.getElementById('vaporview-top');
+    const labels       = document.getElementById('waveform-labels');
+    const valueDisplay = document.getElementById('value-display');
+    const labelsScroll = document.getElementById('waveform-labels-container');
+    const valuesScroll = document.getElementById('value-display-container');
+    const resize1      = document.getElementById("resize-1");
+    const resize2      = document.getElementById("resize-2");
+
+    if (webview === null || labels === null || valueDisplay === null ||
+       labelsScroll === null || valuesScroll === null || resize1 === null ||
+       resize2 === null) {
+      throw new Error("Could not find all required elements");
+    }
+
+    webview.style.gridTemplateColumns = `150px 50px auto`;
+
+    this.webview      = webview;
+    this.labels       = labels;
+    this.valueDisplay = valueDisplay;
+    this.labelsScroll = labelsScroll;
+    this.valuesScroll = valuesScroll;
+    this.resize1      = resize1;
+    this.resize2      = resize2;
+
+    this.dragMove              = this.dragMove.bind(this);
+    this.resize                = this.resize.bind(this);
+    this.dragEnd               = this.dragEnd.bind(this);
+    this.dragStart             = this.dragStart.bind(this);
+    this.handleResizeMousedown = this.handleResizeMousedown.bind(this);
+    this.handleMarkerSet       = this.handleMarkerSet.bind(this);
+    this.handleSignalSelect    = this.handleSignalSelect.bind(this);
+    this.handleReorderSignals  = this.handleReorderSignals.bind(this);
+    this.handleRemoveVariable  = this.handleRemoveVariable.bind(this);
+    this.handleAddVariable     = this.handleAddVariable.bind(this);
+    this.handleRedrawVariable  = this.handleRedrawVariable.bind(this);
+    this.handleUpdateColor     = this.handleUpdateColor.bind(this);
+    this.handleExitBatchMode   = this.handleExitBatchMode.bind(this);
+
+    // Event handlers to handle clicking on a waveform label to select a signal
+    //labels.addEventListener(      'click', (e) => this.clickLabel(e));
+    //valueDisplay.addEventListener('click', (e) => this.clickValueDisplay(e));
+    labelsScroll.addEventListener('click', (e) => this.clickLabel(e));
+    valuesScroll.addEventListener('click', (e) => this.clickValueDisplay(e));
+    // vscode-port: double-click a signal row -> Show Waveform Signal in Source.
+    labelsScroll.addEventListener('dblclick', (e) => {
+      const label = (e.target as HTMLElement)?.closest('.waveform-label') as HTMLElement | null;
+      const rowId = this.getRowIdFromElement(label);
+      if (rowId === null || isNaN(rowId)) {return;}
+      const row = rowHandler.rowItems[rowId] as unknown as {netlistId?: number; scopePath?: string[]; signalName?: string};
+      if (!row || row.netlistId === undefined) {return;}
+      vscodeWrapper.executeCommand('vaporview.sourceLink.showInSource', [{netlistId: row.netlistId}]);
+    });
+    // resize handler to handle column resizing
+    resize1.addEventListener("mousedown",   (e) => {this.handleResizeMousedown(e, resize1, 1);});
+    resize2.addEventListener("mousedown",   (e) => {this.handleResizeMousedown(e, resize2, 2);});
+    // click and drag handlers to rearrange the order of waveform signals
+    labels.addEventListener('mousedown', (e) => {this.dragStart(e);});
+    // Abort an in-progress external drag if the pointer leaves the webview or the
+    // native drag ends without a drop inside us (avoids a stale drop divider).
+    this.webview.addEventListener('dragleave', (e) => {this.handleExternalDragLeave(e);});
+    this.webview.addEventListener('dragend',   (e) => {if (dragController.isActive) {dragController.cancel(e);}});
+
+    this.events.subscribe(ActionType.MarkerSet, this.handleMarkerSet);
+    this.events.subscribe(ActionType.SignalSelect, this.handleSignalSelect);
+    this.events.subscribe(ActionType.ReorderSignals, this.handleReorderSignals);
+    this.events.subscribe(ActionType.AddVariable, this.handleAddVariable);
+    this.events.subscribe(ActionType.RemoveVariable, this.handleRemoveVariable);
+    this.events.subscribe(ActionType.RedrawVariable, this.handleRedrawVariable);
+    this.events.subscribe(ActionType.UpdateColorTheme, this.handleUpdateColor);
+    this.events.subscribe(ActionType.ExitBatchMode, this.handleExitBatchMode);
+  }
+
+  renderLabelsPanels() {
+    if (this.events.isBatchMode) {return;}
+    this.labelsList  = [];
+    this.labelsList.push('<svg id="drag-divider" style="top: 0px; display:none; pointer-events: none;"><line x1="0" y1="0" x2="100%" y2="0"></line></svg>');
+    this.labelsList.push('<div id="draggable-cursor-tag" class="draggable-label" style="position: fixed; top: 0px; display:none; pointer-events: none;"> </div>');
+    viewerState.displayedSignals.forEach((rowId, index) => {
+      const netlistData = rowHandler.rowItems[rowId];
+      this.labelsList.push(netlistData.createLabelElement());
+    });
+    this.labels.innerHTML = this.labelsList.join('');
+  }
+
+  renderValueDisplay() {
+    const transitions: string[] = [];
+    viewerState.displayedSignals.forEach((rowId, index) => {
+      const netlistData = rowHandler.rowItems[rowId];
+      transitions.push(netlistData.createValueDisplayElement());
+    });
+    this.valueDisplay.innerHTML = transitions.join('');
+  }
+
+  clickValueDisplay(event: MouseEvent) {
+    const clickedLabel = (event.target as HTMLElement)?.closest('.value-display-item') as HTMLElement | null;
+    const rowId = this.getRowIdFromElement(clickedLabel);
+    if (rowId === null || isNaN(rowId)) {
+      rowHandler.deselectAllSignals();
+      return;
+    }
+    //this.events.dispatch(ActionType.SignalSelect, [rowId], rowId);
+    handleClickSelection(event, rowId);
+  }
+
+  clickLabel(event: MouseEvent) {
+    if (this.dragInProgress) {return;}
+    if (this.renameActive) {return;}
+    const clickedLabel = (event.target as HTMLElement)?.closest('.waveform-label') as HTMLElement | null;
+    const rowId = this.getRowIdFromElement(clickedLabel);
+    if (rowId === null || isNaN(rowId)) {
+      rowHandler.deselectAllSignals();
+      return;
+    }
+
+    const target = event.target as HTMLElement;
+    if (target.classList.contains('codicon-chevron-down') ||
+        target.classList.contains('codicon-chevron-right')) {
+        const item = rowHandler.rowItems[rowId];
+        // cmux: a row's chevron collapses or expands its slices
+        const slices = (item instanceof NetlistVariable || item instanceof CustomVariable) ? sliceGroupOf(item) : null;
+        if (item instanceof SignalGroup || slices) {
+          (slices || (item as SignalGroup)).toggleCollapse();
+          vscodeWrapper.sendWebviewContext(StateChangeType.User);
+        }
+    } else {
+      //this.events.dispatch(ActionType.SignalSelect, [rowId], rowId);
+      handleClickSelection(event, rowId);
+      //this.doubleClickLabel(rowId);
+    }
+  }
+
+  doubleClickLabel(rowId: RowId) {
+    const time = Date.now();
+    if (time - this.lastClickedTime < 300 && rowId === this.lastClickedSignal) {
+      this.lastClickedSignal = null;
+      this.lastClickedTime   = 0;
+      const rowItem          = rowHandler.rowItems[rowId];
+      if (rowItem instanceof NetlistVariable) {
+        // emit double click event
+      }
+    }
+    this.lastClickedSignal = rowId;
+    this.lastClickedTime   = time;
+  }
+
+  copyValueAtMarker(rowId: RowId | undefined) {
+
+    if (rowId === undefined) {return;}
+    const value = this.valueAtMarker[rowId];
+    if (value === undefined) {return;}
+    const variableItem = rowHandler.rowItems[rowId];
+    if (!(variableItem instanceof NetlistVariable) && !(variableItem instanceof CustomVariable)) {return;}
+
+    const formatString   = variableItem.valueFormat.formatString;
+    const width          = variableItem.signalWidth;
+    const bitVector      = value[value.length - 1];
+    const formattedValue = formatString(bitVector, width, true);
+
+    vscodeWrapper.copyToClipboard(formattedValue);
+  }
+
+  initializeDragHandler(event: MouseEvent) {
+    this.labelsList        = Array.from(this.labels.querySelectorAll('.waveform-label')).map((element) => element.outerHTML);
+    this.pointerStartX     = event.clientX;
+    this.pointerStartY     = event.clientY;
+    this.scrollStartY      = this.labelsScroll.scrollTop;
+    this.dragInProgress    = false;
+    this.dragActive        = true;
+  }
+
+  setIdleItemsState(rowIdList: RowId[]) {
+    // find all idle items and idle expanded groups
+
+    const draggableSignals: RowId[] = [];
+    const draggableGroups: RowId[]  = [];
+    this.draggableRows = [];
+
+    const topLevelRowIds = rowHandler.removeChildrenFromSignalList(rowIdList);
+    topLevelRowIds.forEach((rowId) => {
+      const signalItem = rowHandler.rowItems[rowId];
+      if (signalItem instanceof SignalGroup) {
+        const children = signalItem.getFlattenedRowIdList(false, -1);
+        const childGroups = children.filter((id) => rowHandler.rowItems[id] instanceof SignalGroup);
+        pushAll(draggableGroups, childGroups); // vscode-port: no spread
+        pushAll(this.draggableRows, children);
+      } else if (signalItem instanceof NetlistVariable || signalItem instanceof CustomVariable || signalItem instanceof SignalSeparator) {
+        draggableSignals.push(rowId);
+        pushAll(this.draggableRows, signalItem.getFlattenedRowIdList(false, -1)); // vscode-port: no spread; // cmux: with its slices; was rowId
+      }
+    });
+
+    this.idleItems = [];
+    this.idleGroups = [];
+    //const draggableRows = draggableSignals.concat(draggableGroups);
+    //let idleRowIds: number[] = [];
+    //viewerState.displayedSignals.forEach((id: RowId) => {
+    //  if (draggableRows.includes(id)) {return;}
+    //  const signalItem = dataManager.rowItems[id];
+    //  const children = signalItem.getFlattenedRowIdList(true, -1);
+    //  const idleRows = children.filter((childId) => !draggableRows.includes(childId));
+    //  idleRowIds = idleRowIds.concat(idleRows);
+    //});
+    this.draggableRows.forEach((id) => {
+      const element = this.labels.querySelector(`#label-${id}`);
+      if (element) {
+        element.classList.remove('is-idle');
+        this.idleItems.push(element);
+      }
+    });
+
+    viewerState.visibleSignalsFlat.forEach((id: RowId) => {
+      const signalItem = rowHandler.rowItems[id];
+      if (signalItem instanceof SignalGroup && !draggableGroups.includes(id)) {
+        const element = this.labels.querySelector(`#label-${id}`) as HTMLElement | null;
+        if (element) {
+          const boundingBox = element.getBoundingClientRect();
+          this.idleGroups.push({
+            element: element,
+            top: boundingBox.top + this.labels.scrollTop,
+            bottom: boundingBox.bottom + this.labels.scrollTop,
+            left: element.children[1].getBoundingClientRect().left,
+          });
+        }
+      }
+    });
+
+    if (rowIdList.length > 1) {
+      this.dragCursorText = rowIdList.length.toString();
+    }
+  }
+
+  dragStart(event: MouseEvent) {
+    if (event.button !== 0) {return;} // Only allow left mouse button drag
+    if (this.renameActive) {return;} // Prevent drag if rename is active
+    //event.preventDefault();
+    
+    this.draggableItem = (event.target as HTMLElement)?.closest('.waveform-label') as HTMLElement | null;
+    if (!this.draggableItem) {return;}
+    const rowId = parseInt(this.draggableItem.id.split('-')[1]);
+    if (isNaN(rowId)) {return;}
+    // cmux: slices move only with their row
+    const parentGroupId = getParentGroupId(rowId);
+    if (parentGroupId && rowHandler.rowItems[rowHandler.groupIdTable[parentGroupId]] instanceof SliceGroup) {return;}
+
+    let rowIdList = [rowId];
+    if (viewerState.selectedSignal.includes(rowId)) {
+      rowIdList = viewerState.selectedSignal;
+    }
+
+    const signalItem = rowHandler.rowItems[rowId];
+    if (signalItem) {
+      this.dragCursorText = signalItem.getLabelText();
+    }
+
+    this.draggableItem.classList.remove('is-idle');
+    this.defaultDragDividerY = this.draggableItem.getBoundingClientRect().top + this.labelsScroll.scrollTop;
+    if (this.dragFreezeTimeout) { clearTimeout(this.dragFreezeTimeout); }
+    this.dragFreeze = true;
+    this.dragFreezeTimeout = setTimeout(() => {this.dragFreeze = false;}, 100);
+
+    this.initializeDragHandler(event);
+    this.setIdleItemsState(rowIdList);
+
+    dragController.begin(event, {
+      kind: 'pointer',
+      focusOnStart: true,
+      onMove: (e) => this.dragMove(e),
+      onEnd:  (e, abort) => this.dragEnd(e, abort),
+    });
+  }
+
+  dragStartExternal(event: MouseEvent | DragEvent) {
+
+    this.initializeDragHandler(event);
+    this.setIdleItemsState([]);
+    this.defaultDragDividerY = this.labels.getBoundingClientRect().bottom + this.labelsScroll.scrollTop;
+
+    dragController.begin(event, {
+      kind: 'external',
+      onMove: (e) => this.updateIdleItemsStateAndPosition(e),
+      onEnd:  (e, abort) => {this.dragEndExternal(e, abort);},
+    });
+  }
+
+  setDraggableItemClasses() {
+    if (!this.draggableItem) {return;}
+    //this.draggableItem.classList.remove('is-idle');
+    this.dragCursorTag = this.labels.querySelector('#draggable-cursor-tag');
+    if (this.dragCursorTag) {
+      this.dragCursorTag.style.display = 'flex';
+      this.dragCursorTag.textContent = this.dragCursorText; // cmux: the dragged row's name is text, not HTML
+    }
+    this.draggableRows.forEach((rowId) => {
+      const element = this.labels.querySelector(`#label-${rowId}`);
+      if (element) {
+        element.classList.add('is-draggable');
+        element.classList.remove('is-idle');
+      }
+    });
+  }
+
+  setDragDivider() {
+    this.dragDivider = this.labels.querySelector('#drag-divider');
+    if (this.dragDivider) {this.dragDivider.style.display = 'block';}
+    this.dragInProgress = true;
+  }
+
+  dragMove(event: MouseEvent | DragEvent) {
+
+    if (!this.dragActive) {return;}
+    if (!this.draggableItem) {return;}
+    if (this.dragFreeze) {return;}
+    if (!this.dragInProgress) {
+      this.setDraggableItemClasses();
+      this.setDragDivider();
+    }
+
+    if (this.dragCursorTag) {
+      this.dragCursorTag.style.transform = `translate(${event.clientX + 3}px, ${event.clientY}px)`;
+    }
+
+    this.updateIdleItemsStateAndPosition(event);
+  }
+
+  public dragMoveExternal(event: MouseEvent | DragEvent) {
+
+    if (!this.dragInProgress) {
+      this.dragStartExternal(event);
+      this.setDragDivider();
+    }
+
+    this.updateIdleItemsStateAndPosition(event);
+  }
+
+  updateIdleItemsStateAndPosition(e: MouseEvent | DragEvent) {
+
+    const labelsRect        = this.labels.getBoundingClientRect();
+    const draggableItemY    = e.clientY;
+    const scrollDelta       = (this.scrollStartY ?? 0) - this.labelsScroll.scrollTop;
+    const pointerY          = draggableItemY - scrollDelta;
+    this.groupContainer     = null;
+    let groupContainerBox: DOMRect = labelsRect;
+    let smallestGroupBox: number = Infinity;
+    let width = 0;
+
+    // Reset all idle items and groups
+    if (e.clientX <= labelsRect.right) {
+      this.idleGroups.forEach((item: IdleGroupEntry) => {
+        if (item.element.classList.contains('is-idle') === false) {return;}
+        if (item.element.classList.contains('expanded-group') === false) {return;}
+        item.element.style.backgroundColor = 'transparent';
+        if (item.top < pointerY && item.bottom > pointerY && e.clientX > item.left) {
+          const groupHeight = item.bottom - item.top;
+          if (groupHeight < smallestGroupBox) {
+            smallestGroupBox = groupHeight;
+            this.groupContainer = item.element;
+            width = item.left;
+          }
+        }
+      });
+    }
+
+    let idleItems: Element[]  = [];
+    // Re-read groupContainer since it may have been set in the forEach above
+    const groupContainer = this.groupContainer as HTMLElement | null;
+    if (groupContainer !== null) {
+      groupContainer.style.backgroundColor = styles.dropBackgroundColor;
+      groupContainerBox = groupContainer.children[1].getBoundingClientRect();
+      idleItems = Array.from(groupContainer.children[1].children);
+      this.closestItem = null;
+    } else {
+      idleItems = Array.from(this.labels.children);
+    }
+
+    let breakFlag = false;
+    this.indexOffset = 0;
+    let dragDividerY: number | null = groupContainerBox.top - labelsRect.top;
+
+    idleItems.forEach((item: Element) => {
+      if (breakFlag) {return;}
+      if (!item.classList.contains('is-idle') && !item.classList.contains('is-draggable') ) {return;}
+      const itemRect = item.getBoundingClientRect();
+      if (draggableItemY >= itemRect.top && draggableItemY < itemRect.bottom) {
+        dragDividerY = itemRect.top - labelsRect.top;
+        const itemY = itemRect.top + itemRect.height / 2;
+        if (draggableItemY >= itemY) {
+          this.indexOffset = 1;
+          dragDividerY += itemRect.height;
+        }
+        breakFlag = true;
+        this.closestItem = item as HTMLElement;
+      }
+    });
+
+    if (!breakFlag) {
+      if (draggableItemY >= groupContainerBox.bottom) {
+        dragDividerY = groupContainerBox.bottom - labelsRect.top;
+        this.closestItem = (idleItems[idleItems.length - 1] as HTMLElement) || null;
+        this.indexOffset = 1;
+      } else if (draggableItemY < groupContainerBox.top) {
+        dragDividerY = groupContainerBox.top - labelsRect.top;
+        this.closestItem = (idleItems[0] as HTMLElement) || null;
+        this.indexOffset = 0;
+      } else {
+        dragDividerY = (this.defaultDragDividerY - this.labelsScroll.scrollTop) - labelsRect.top;
+        this.closestItem = this.draggableItem;
+        this.indexOffset = 0;
+      }
+    }
+
+    if (this.dragDivider !== null && dragDividerY !== null) {
+      this.dragDivider.style.top = `${dragDividerY}px`;
+      this.dragDivider.style.left = width + 'px';
+    }
+  }
+
+  public getDropIndex() {
+    const newGroupRowId = this.getRowIdFromElement(this.groupContainer);
+    let newGroupId = 0;
+    if (newGroupRowId !== null) {
+      newGroupId = rowHandler.groupIdTable.indexOf(newGroupRowId);
+      if (newGroupId === -1) {
+        newGroupId = 0; // If the group is not found, default to group 0
+      }
+    }
+
+    let newIndex = 0;
+    const closestItemRowId = this.getRowIdFromElement(this.closestItem);
+    if (closestItemRowId === null || isNaN(closestItemRowId)) {
+      newIndex = 0;
+    } else{
+      const dropItemIndex  = getIndexInGroup(closestItemRowId, newGroupId) || 0;
+      newIndex = dropItemIndex + this.indexOffset;
+    }
+
+    return {newGroupId, newIndex};
+  }
+
+  clearDragHandler() {
+    this.idleItems.forEach((item) => {(item as HTMLElement).style.cssText = '';});
+    this.idleItems      = [];
+    this.idleGroups     = [];
+    this.draggableRows  = [];
+    this.labelsList     = [];
+    this.dragInProgress = false;
+    this.pointerStartX  = null;
+    this.pointerStartY  = null;
+    this.draggableItem  = null;
+    this.dragActive     = false;
+    if (this.dragDivider) {this.dragDivider.style.display = 'none';}
+  }
+
+  public dragEndExternal(event: MouseEvent | KeyboardEvent | null, abort: boolean) {
+    this.clearDragHandler();
+    if (abort) {
+      this.renderLabelsPanels();
+      this.renderValueDisplay();
+    }
+    return this.getDropIndex();
+  }
+
+  handleExternalDragLeave(event: DragEvent) {
+    if (!dragController.isActive) {return;}
+    const rect = this.webview.getBoundingClientRect();
+    const outside = event.clientX < rect.left || event.clientX > rect.right ||
+                    event.clientY < rect.top  || event.clientY > rect.bottom;
+    if (outside) {dragController.cancel(event);}
+  }
+
+  dragEnd(event: MouseEvent | KeyboardEvent | null, abort: boolean) {
+
+    this.dragActive = false;
+    if (!this.dragInProgress) {return;}
+    if (!this.draggableItem) {return;}
+    if (event) {event.preventDefault();}
+
+    const {newGroupId, newIndex} = this.getDropIndex();
+
+    const draggableItemRowId = this.getRowIdFromElement(this.draggableItem);
+    if (draggableItemRowId === null || isNaN(draggableItemRowId)) {
+      throw new Error("Invalid draggable item row ID: " + draggableItemRowId);
+    }
+    let rowIdList = [draggableItemRowId];
+    if (viewerState.selectedSignal.includes(draggableItemRowId)) {
+      rowIdList = viewerState.selectedSignal;
+    }
+    //const oldGroupId = getParentGroupId(draggableItemRowId) || 0;
+    //const oldIndex   = getIndexInGroup(draggableItemRowId, oldGroupId) || 0;
+
+    this.clearDragHandler();
+    if (this.dragFreezeTimeout) { clearTimeout(this.dragFreezeTimeout); }
+
+    if (!abort) {
+      this.events.reorderSignals(rowIdList, newGroupId, newIndex);
+      //console.log('dragEnd');
+      vscodeWrapper.sendWebviewContext(StateChangeType.User);
+    } else {
+      this.renderLabelsPanels();
+      this.renderValueDisplay();
+    }
+  }
+
+  public showRenameInput(rowId: RowId) {
+    dragController.cancel(null); // Abort any drag operation
+    const signalItem   = rowHandler.rowItems[rowId];
+    const labelElement = document.getElementById(`label-${rowId}`);
+    if (!labelElement) {return;}
+    const waveformRow  = labelElement.querySelector('.waveform-row');
+    if (!waveformRow) {return;}
+    waveformRow.classList.remove('is-selected');
+
+    // Get the current name for the textarea
+    const currentName = signalItem.getLabelText() || '';
+    waveformRow.innerHTML = `<textarea id="rename-input-${rowId}" class="rename-input" autocorrect="off" autocapitalize="off" spellcheck="false" wrap="off">${htmlSafe(currentName)}</textarea>`;
+    this.renameActive = true;
+
+    // Focus the textarea and select all text
+    const textarea = document.getElementById(`rename-input-${rowId}`) as HTMLTextAreaElement;
+    if (!textarea) {return;}
+    textarea.focus();
+    textarea.select();
+
+    // Handle Enter key to submit rename
+    // we need this event handler because the global keydown handler will return early
+    // due to the renameActive flag
+    textarea.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        this.finishRename(rowId, waveformRow, textarea);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        this.cancelRename();
+      }
+    });
+
+    // Handle blur to cancel rename
+    textarea.addEventListener('blur', () => {this.cancelRename();});
+  }
+
+  public cancelRename() {
+    this.renameActive = false;
+    this.renderLabelsPanels();
+  }
+
+  private finishRename(rowId: RowId, waveformRow: Element, textarea: HTMLTextAreaElement) {
+    const signalItem    = rowHandler.rowItems[rowId];
+    const isSignalGroup = signalItem instanceof SignalGroup;
+    const newNameInput  = textarea.value.trim() || signalItem.getLabelText();
+    const parentGroupId = getParentGroupId(rowId) || 0;
+    const isTaken = rowHandler.groupNameExists(newNameInput, parentGroupId) && isSignalGroup;
+    const isEmpty = newNameInput.trim().length === 0;
+    const renameValid = !isEmpty && !isTaken;
+
+    if (!this.renameActive) {return;}
+    this.renameActive = false;
+    if (renameValid) {
+      signalItem.setLabelText(newNameInput.trim());
+    }
+    waveformRow.innerHTML = signalItem.createWaveformRowContent();
+    if (viewerState.selectedSignal.includes(rowId)) {
+      waveformRow.classList.add('is-selected');
+    }
+    vscodeWrapper.sendWebviewContext(StateChangeType.User);
+  }
+
+  getRowIdFromElement(element: HTMLElement | null): RowId | null {
+    if (!element) {return null;}
+    const id = element.id.split('-')[1];
+    if (!id) {return null;}
+    const rowId = parseInt(id);
+    if (isNaN(rowId)) {return null;}
+    return rowId;
+  }
+
+  handleResizeMousedown(event: MouseEvent, element: HTMLElement, index: number) {
+    this.resizeIndex   = index;
+    this.resizeElement = element;
+    this.resizeElement.classList.remove('is-idle');
+    this.resizeElement.classList.add('is-resizing');
+
+    dragController.begin(event, {
+      kind: 'pointer',
+      focusOnStart: true,
+      onMove: (e) => this.resize(e),
+      onEnd: () => {
+        this.resizeElement?.classList.remove('is-resizing');
+        this.resizeElement?.classList.add('is-idle');
+        this.events.resize();
+      },
+    });
+  }
+
+  // resize handler to handle resizing
+  resize(e: MouseEvent) {
+    const gridTemplateColumns = this.webview.style.gridTemplateColumns;
+    const column1 = parseInt(gridTemplateColumns.split(' ')[0]);
+    const column2 = parseInt(gridTemplateColumns.split(' ')[1]);
+    const xPosition = Math.max(10, e.x);
+
+    if (this.resizeIndex === 1) {
+      this.webview.style.gridTemplateColumns = `${xPosition}px ${column2}px auto`;
+      this.resize1.style.left = `${xPosition}px`;
+      this.resize2.style.left = `${xPosition + column2}px`;
+    } else if (this.resizeIndex === 2) {
+      const newWidth    = Math.max(10, xPosition - column1);
+      const newPosition = Math.max(10 + column1, xPosition);
+      this.webview.style.gridTemplateColumns = `${column1}px ${newWidth}px auto`;
+      this.resize2.style.left = `${newPosition}px`;
+    }
+    this.events.resize();
+  }
+
+  handleAddVariable(rowIdList: RowId[], updateFlag: boolean) {
+    if (this.events.isBatchMode) {return;}
+    this.renderLabelsPanels();
+    this.renderValueDisplay();
+  }
+
+  handleRemoveVariable(rowId: RowId[], recursive: boolean) {
+    this.renderLabelsPanels();
+    this.renderValueDisplay();
+  }
+
+  handleReorderSignals(rowIdList: number[], newGroupId: number, newIndex: number) {
+    if (this.events.isBatchMode) {return;}
+    this.renderLabelsPanels();
+    this.renderValueDisplay();
+  }
+
+  handleExitBatchMode() {
+    this.renderLabelsPanels();
+    this.renderValueDisplay();
+  }
+
+  handleMarkerSet(time: number, markerType: number, dragging: boolean) {
+
+    if (time > viewport.timeStop || time < 0) {return;}
+
+    if (markerType === 0) {
+      viewerState.displayedSignalsFlat.forEach((rowId) => {
+        const signalItem = rowHandler.rowItems[rowId];
+        this.valueAtMarker[rowId] = signalItem.getValueAtTime(time);
+      });
+
+      this.renderValueDisplay();
+    }
+  }
+
+  selectRowId(rowId: RowId, isSelected: boolean) {
+    const signalItem = rowHandler.rowItems[rowId];
+    if (!signalItem) {return;}
+    signalItem.isSelected = isSelected;
+  }
+
+  handleSignalSelect(rowIdList: RowId[], lastRowId: RowId | null) {
+
+    this.dragActive = false;
+    if (this.dragDivider) {this.dragDivider.style.display = 'none';}
+    //if (rowIdList.length === 0) {return;}
+
+    viewerState.displayedSignalsFlat.forEach((rowId) => {
+      this.selectRowId(rowId, false);
+    });
+
+    rowIdList.forEach((rowId) => {
+      this.selectRowId(rowId, true);
+    });
+
+    viewerState.lastSelectedSignal = lastRowId;
+    viewerState.selectedSignal     = rowIdList;
+
+    if (rowIdList.length > 0) {
+      revealSignal(rowIdList[0]);
+    }
+
+    this.renderLabelsPanels();
+    this.renderValueDisplay();
+  }
+
+  handleRedrawVariable(rowId: RowId) {
+    this.renderLabelsPanels();
+    this.renderValueDisplay();
+  }
+
+  handleUpdateColor() {
+    this.renderLabelsPanels();
+    this.renderValueDisplay();
+  }
+}

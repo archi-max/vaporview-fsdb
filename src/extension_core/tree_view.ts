@@ -1,0 +1,474 @@
+import * as vscode from 'vscode';
+import { NetlistId, SignalId, VariableEncoding, WebviewStateEvent } from '../common/types';
+import { bitRangeString, createInstancePath, parseParamValue, timeHz, toStringWithCommas } from '../common/functions';
+import type { VaporviewDocument } from './document';
+import { WaveformViewerProvider } from './viewer_provider';
+import type { NetlistTreeItemData, SignalEvent } from '../../packages/vaporview-api/types';
+
+// Scopes
+const scopeColor    = new vscode.ThemeColor('charts.purple');
+const moduleIcon    = new vscode.ThemeIcon('chip',             scopeColor);
+const taskIcon      = new vscode.ThemeIcon('debug-stackframe', scopeColor);
+const funcIcon      = new vscode.ThemeIcon('symbol-module',    scopeColor);
+const beginIcon     = new vscode.ThemeIcon('debug-start',      scopeColor);
+const forkIcon      = new vscode.ThemeIcon('repo-forked',      scopeColor);
+const structIcon    = new vscode.ThemeIcon('symbol-structure', scopeColor);
+const unionIcon     = new vscode.ThemeIcon('surround-with',    scopeColor);
+const classIcon     = new vscode.ThemeIcon('symbol-misc',      scopeColor);
+const interfaceIcon = new vscode.ThemeIcon('debug-disconnect', scopeColor);
+const packageIcon   = new vscode.ThemeIcon('package',          scopeColor);
+const scopeIcon     = new vscode.ThemeIcon('symbol-module',    scopeColor);
+const unknownIcon   = new vscode.ThemeIcon('symbol-misc',      scopeColor);
+
+export function getScopeIcon(type: string) {
+  const typeName = type.toLocaleLowerCase();
+  switch (typeName) {
+    case 'module':           {return moduleIcon;}
+    case 'task':             {return taskIcon;}
+    case 'function':         {return funcIcon;}
+    case 'begin':            {return beginIcon;}
+    case 'fork':             {return forkIcon;}
+    case 'generate':         {return scopeIcon;}
+    case 'struct':           {return structIcon;}
+    case 'union':            {return unionIcon;}
+    case 'class':            {return classIcon;}
+    case 'interface':        {return interfaceIcon;}
+    case 'package':          {return packageIcon;}
+    case 'program':          {return scopeIcon;}
+    case 'vhdlarchitecture': {return scopeIcon;}
+    case 'vhdlprocedure':    {return taskIcon;}
+    case 'vhdlfunction':     {return funcIcon;}
+    case 'vhdlrecord':       {return scopeIcon;}
+    case 'vhdlprocess':      {return scopeIcon;}
+    case 'vhdlblock':        {return scopeIcon;}
+    case 'vhdlforgenerate':  {return scopeIcon;}
+    case 'vhdlifgenerate':   {return scopeIcon;}
+    case 'vhdlgenerate':     {return scopeIcon;}
+    case 'vhdlpackage':      {return packageIcon;}
+    case 'ghwgeneric':       {return scopeIcon;}
+    case 'vhdlarray':        {return scopeIcon;}
+    case 'unknown':          {return unknownIcon;}
+    case 'clocking':         {return scopeIcon;}
+    case 'svarray':          {return scopeIcon;}
+  }
+  return unknownIcon;
+}
+
+export function createScope(
+  name: string,
+  type: string,
+  path: string[],
+  netlistId: number,
+  scopeOffsetIdx: number, 
+  uri: vscode.Uri
+) {
+
+  const icon = getScopeIcon(type);
+  const typeName = type.toLocaleLowerCase();
+
+  // fsdb vhdlarray might contain feild, remove it to align with wellen
+  if (typeName === 'vhdlarray') {
+    const regex  = /\[(\d+:)?(\d+)\]$/;
+    name = name.replace(regex, '');
+  }
+
+  const module    = new NetlistItem(name, "", typeName, VariableEncoding.none, 0, 0, netlistId, name, path, 0, 0, "", scopeOffsetIdx, [], vscode.TreeItemCollapsibleState.Collapsed, uri);
+  module.iconPath = icon;
+
+  return module;
+}
+
+// Variables
+const chartsGreen  = new vscode.ThemeColor('charts.green');
+const chartsOrange = new vscode.ThemeColor('charts.orange');
+const chartsYellow = new vscode.ThemeColor('charts.yellow');
+const chartsBlue   = new vscode.ThemeColor('charts.blue');
+const regIcon      = new vscode.ThemeIcon('symbol-array',     chartsGreen);
+const wireIcon     = new vscode.ThemeIcon('symbol-interface', chartsGreen);
+const intIcon      = new vscode.ThemeIcon('symbol-variable',  chartsGreen);
+const paramIcon    = new vscode.ThemeIcon('settings',         chartsBlue);
+const realIcon     = new vscode.ThemeIcon('pulse',            chartsOrange);
+const defaultIcon  = new vscode.ThemeIcon('file-binary',      chartsGreen);
+const stringIcon   = new vscode.ThemeIcon('symbol-key',       chartsYellow);
+const portIcon     = new vscode.ThemeIcon('plug',             chartsGreen);
+const timeIcon     = new vscode.ThemeIcon('watch',            chartsGreen);
+const enumIcon     = new vscode.ThemeIcon('symbol-parameter', chartsGreen);
+
+export function getVarIcon(type: string) {
+  const typeName = type.toLocaleLowerCase();
+  switch (typeName) {
+    case 'event':           {return defaultIcon;}
+    case 'integer':         {return intIcon;}
+    case 'parameter':       {return paramIcon;}
+    case 'real':            {return realIcon;}
+    case 'reg':             {return defaultIcon;}
+    case 'supply0':         {return defaultIcon;}
+    case 'supply1':         {return defaultIcon;}
+    case 'time':            {return timeIcon;}
+    case 'tri':             {return defaultIcon;}
+    case 'triand':          {return defaultIcon;}
+    case 'trior':           {return defaultIcon;}
+    case 'trireg':          {return defaultIcon;}
+    case 'tri0':            {return defaultIcon;}
+    case 'tri1':            {return defaultIcon;}
+    case 'wand':            {return defaultIcon;}
+    case 'wire':            {return wireIcon;}
+    case 'wor':             {return defaultIcon;}
+    case 'string':          {return stringIcon;}
+    case 'port':            {return portIcon;}
+    case 'sparsearray':     {return defaultIcon;}
+    case 'realtime':        {return timeIcon;}
+    case 'realparameter':   {return paramIcon;}
+    case 'bit':             {return defaultIcon;}
+    case 'logic':           {return defaultIcon;}
+    case 'int':             {return intIcon;}
+    case 'shortint':        {return intIcon;}
+    case 'longint':         {return intIcon;}
+    case 'byte':            {return defaultIcon;}
+    case 'enum':            {return enumIcon;}
+    case 'shortreal':       {return defaultIcon;}
+    case 'boolean':         {return defaultIcon;}
+    case 'bitvector':       {return defaultIcon;}
+    case 'stdlogic':        {return defaultIcon;}
+    case 'stdlogicvector':  {return defaultIcon;}
+    case 'stdulogic':       {return defaultIcon;}
+    case 'stdulogicvector': {return defaultIcon;}
+  }
+  return defaultIcon;
+}
+
+export function createVar(
+  name: string,
+  paramValue: string,
+  type: string,
+  encoding: string,
+  path: string[],
+  netlistId: NetlistId,
+  signalId: SignalId,
+  width: number,
+  msb: number,
+  lsb: number,
+  enumType: string,
+  isFsdb: boolean,
+  uri: vscode.Uri
+) {
+  const field = bitRangeString(msb, lsb, false);
+  let label = name;
+
+  if (isFsdb) {
+    // Prefer FSDB's own [msb:lsb] suffix when present; otherwise add it so
+    // bit-selects with the same base name are distinguishable in the tree.
+    const regex = /\[(\d+:)?(\d+)\]$/;
+    // vscode-port: strip only a suffix that is the variable's own range ("cnt[7:0]", a single bit "a[3]"); an index that
+    // is not (memory word "mem[12]" of 8 bits [7:0]) is part of the name, or every word of a memory was named "mem".
+    const m = name.match(regex);
+    // vscode-port: a single index after another index ("vld_mirror[83][0]", a 1-bit element of a 2-D array) is
+    // the element's index, not its range: stripped, it became "vld_mirror[83]", and the path lookup (findChild) missed it.
+    const own = !!m && (m[1] !== undefined ? Number(m[1].slice(0, -1)) === msb && Number(m[2]) === lsb
+      : msb === lsb && Number(m[2]) === msb && !/\]$/.test(name.slice(0, m.index)));
+    const stripped = own ? name.replace(regex, '') : name;
+    if (stripped === name && field !== '') {
+      label = name + field;
+    }
+    name = stripped;
+  } else {
+    label = name + field;
+  }
+
+  let variableEncoding = VariableEncoding.none;
+  switch (encoding) {
+    case 'BitVector': {variableEncoding = VariableEncoding.BitVector; break;}
+    case 'Real':      {variableEncoding = VariableEncoding.Real; break;}
+    case 'String':    {variableEncoding = VariableEncoding.String; break;}
+    default:          {variableEncoding = VariableEncoding.none; break;}
+  }
+
+  const variable = new NetlistItem(label, paramValue, type, variableEncoding, width, signalId, netlistId, name, path, msb, lsb, enumType, -1, [], vscode.TreeItemCollapsibleState.None, uri);
+  const typeName = type.toLocaleLowerCase();
+  const icon     = getVarIcon(type);
+  variable.iconPath = icon;
+  if ((typeName === 'wire') || (typeName === 'reg') || (icon === defaultIcon)) {
+    if (width > 1) {variable.iconPath = regIcon;}
+    else           {variable.iconPath = wireIcon;}
+  }
+
+  return variable;
+}
+
+// #region NetlistTreeDataProvider
+export class NetlistTreeDataProvider implements vscode.TreeDataProvider<NetlistItem> {
+
+  private treeData: NetlistItem[] = [];
+  private _onDidChangeTreeData: vscode.EventEmitter<NetlistItem | undefined> = new vscode.EventEmitter<NetlistItem | undefined>();
+  readonly onDidChangeTreeData: vscode.Event<NetlistItem | undefined> = this._onDidChangeTreeData.event;
+  private document: VaporviewDocument | undefined;
+  private lastClickedTreeItem: vscode.Uri | undefined = undefined;
+  private lastClickedTime: number = 0;
+  private _selectedSignals: NetlistItem[] = [];
+  public get selectedSignals(): NetlistItem[] {return this._selectedSignals;}
+
+  // onDidChangeSelection() event returns readonly elements
+  // so we need to copy the selected elements to a new array
+  // Six one way, half a dozen the other. One is just more concise...
+  public handleSelectionChanged = (e: vscode.TreeViewSelectionChangeEvent<NetlistItem>, uri: vscode.Uri | undefined) => {
+    this._selectedSignals = [];
+    e.selection.forEach((element) => {
+      this._selectedSignals.push(element);
+    });
+
+    if (this._selectedSignals.length === 1 && uri !== undefined) {
+      const netlistData = this._selectedSignals[0];
+
+      WaveformViewerProvider.signalSelectEventEmitter.fire({
+        uri: uri.toString(),
+        instancePath: [netlistData.instancePath()],
+        netlistId: [netlistData.netlistId],
+        source: "netlistView",
+      } as SignalEvent);
+    }
+  };
+
+  public loadDocument(document: VaporviewDocument) {
+    this.setTreeData(document.treeData);
+    this.document = document;
+    this._selectedSignals = [];
+  }
+
+  // Method to set the tree data
+  private setTreeData(netlistItems: NetlistItem[]) {
+    this.treeData = netlistItems;
+    this._onDidChangeTreeData.fire(undefined); // Trigger a refresh of the Netlist view
+  }
+
+  public hide() {
+    this.setTreeData([]);
+    this.document = undefined;
+    this._selectedSignals = [];
+  }
+
+  public getTreeData(): NetlistItem[] {return this.treeData;}
+  public getTreeItem(element:  NetlistItem): vscode.TreeItem {return element;}
+  public getChildren(element?: NetlistItem): Thenable<NetlistItem[]> {
+    return this.document?.getScopeChildren(element) ?? Promise.resolve([]);
+  }
+
+  public getParent(element: NetlistItem): vscode.ProviderResult<NetlistItem> {
+    if (this.document && element.scopePath.length !== 0) {
+      return Promise.resolve(this.document.findTreeItem(element.scopePath.join('.'), undefined, undefined));
+    }
+    return null;
+  }
+
+  public clickNetlistItem(uri: vscode.Uri, netlistId: number) {
+    const currentTime    = Date.now();
+    const deltaTime      = currentTime - this.lastClickedTime;
+    this.lastClickedTime = currentTime;
+    let newUri: vscode.Uri | undefined = uri;
+
+    if (deltaTime < 300 && uri === this.lastClickedTreeItem) {
+      //const treeItemPath = uri.path || uri.authority; // fallback for different URI formats
+      if (!this.document) {return;}
+      //if (treeItemPath !== this.document.uri.fsPath) {return;}
+
+      this.document.renderSignals([netlistId], undefined, undefined);
+      newUri = undefined;
+    }
+
+    this.lastClickedTreeItem = newUri;
+  }
+
+  refresh(): void {this._onDidChangeTreeData.fire(undefined);}
+}
+
+// #region NetlistItem
+export class NetlistItem extends vscode.TreeItem implements NetlistTreeItemData {
+
+  //public numberFormat: string;
+  public fsdbVarLoaded: boolean = false; // Only used in fsdb
+  public resourceUri: vscode.Uri;
+  public readonly command: vscode.Command | undefined;
+
+  constructor(
+    public readonly label:      string,
+    public          paramValue: string,
+    public readonly type:       string,
+    public readonly encoding:   VariableEncoding,
+    public readonly width:      number,
+    public readonly signalId:   SignalId, // Signal-specific information
+    public readonly netlistId:  NetlistId, // Netlist-specific information
+    public readonly name:       string,
+    public readonly scopePath:  string[],
+    public readonly msb:        number,
+    public readonly lsb:        number,
+    public readonly enumType:   string,
+    public readonly scopeOffsetIdx: number, // Only used in fsdb
+    public children:         NetlistItem[] = [],
+    public collapsibleState: vscode.TreeItemCollapsibleState,
+    uri: vscode.Uri
+  ) {
+
+    super(label, collapsibleState);
+    const fullName = this.instancePath();
+    //this.numberFormat = "hexadecimal";
+
+    let fragmentId = "";
+    if (collapsibleState === vscode.TreeItemCollapsibleState.None) {
+      fragmentId = 'var=' + netlistId;
+      this.contextValue = 'netlistVar'; // Set a context value for leaf nodes
+    } else {
+      fragmentId = 'scope=' + netlistId;
+      this.contextValue = 'netlistScope'; // Set a context value for parent nodes
+    }
+
+    this.setParamAndTooltip(paramValue);
+    this.resourceUri = vscode.Uri.parse(`waveform://${uri.fsPath}#${fragmentId}&net=${this.instancePath()}`);
+
+    // vaporview.clickNetlistItem doesn't need to be registered in package.json, since it's internal
+    if (this.contextValue === 'netlistVar') {
+      this.command = {
+        command: "vaporview.clickNetlistItem",
+        title: "Add to viewer",
+        arguments: [{uri: this.resourceUri, netlistId: this.netlistId}]
+      };
+    } else {
+      this.command = undefined;
+    }
+  }
+
+  instancePath(): string {return createInstancePath(this.scopePath, this.name);}
+
+  setParamAndTooltip(paramValue: string) {
+    this.paramValue  = paramValue;
+    this.description = parseParamValue(paramValue);
+    this.tooltip     = "Name: " + this.instancePath() + "\n" + "Type: " + this.type + "\n";
+
+    if (this.collapsibleState === vscode.TreeItemCollapsibleState.None) {
+      this.tooltip += "Width: " + this.width + "\n" + "Encoding: " + this.encoding;
+    }
+    if (this.paramValue !== "") {
+      this.tooltip += "\n" + "Parameter Value: " + this.description;
+    }
+  }
+
+  // Method to recursively find a child element in the tree
+  async findChild(label: string[], document: VaporviewDocument, msb: number | undefined, lsb: number | undefined): Promise<NetlistItem | null> {
+
+    // If the label is empty, return the current item, but try to find the child with the specified msb and lsb
+    if (label.length === 0) {
+      if (this.contextValue === 'netlistScope') {return this;}
+      if (this.children.length === 0 || this.children === undefined) {return this;}
+      if (msb === undefined || lsb === undefined) {return this;}
+      if (this.msb === msb && this.lsb === lsb) {return this;}
+
+      const returnItem = this.children.find(childItem => childItem.msb === msb && childItem.lsb === lsb);
+      if (returnItem) {return returnItem;}
+      return this;
+    }
+
+    const currentModule = label[0];
+    if (this.children.length === 0 ||
+      ((document.fileType === 'fsdb' || document.fileType === 'wcz') && this.fsdbVarLoaded === false)) { // For fsdb, variables are loaded on demand (vscode-port: wcz too)
+      await document.getScopeChildren(this);
+    }
+
+    // vscode-port: else the full name as the dump has it. A 1-bit element whose index equals its own range
+    // ("packet_valid[0]" of a 1-D unpacked array, msb=lsb=0) is listed as "packet_valid" (createVar strips the
+    // suffix); its label keeps the full name, so a path with the index still finds it.
+    const childItem = this.children.find((child) => child.name === currentModule)
+      ?? (/\]$/.test(currentModule) ? this.children.find((child) => child.contextValue !== 'netlistScope' && child.label === currentModule) : undefined);
+
+    if (childItem) {
+      return await childItem.findChild(label.slice(1), document, msb, lsb);
+    } else {
+      return null;
+    }
+  }
+}
+
+
+// We don't need to do anything special for drag and drop because the resource URI has the data we need
+export const netlistItemDragAndDropController: vscode.TreeDragAndDropController<NetlistItem> = {
+  dragMimeTypes: [],
+  dropMimeTypes: [],
+  handleDrag: (source: readonly NetlistItem[], dataTransfer: vscode.DataTransfer, token: vscode.CancellationToken) => {return Promise.resolve();},
+  handleDrop: (target: NetlistItem | undefined, dataTransfer: vscode.DataTransfer, token: vscode.CancellationToken) => {return Promise.resolve();},
+};
+
+//#region Status Bar
+export class VaporviewStatusBar {
+
+  public markerTimeStatusBarItem: vscode.StatusBarItem;
+  public deltaTimeStatusBarItem: vscode.StatusBarItem;
+  public selectedSignalStatusBarItem: vscode.StatusBarItem;
+
+  constructor(
+    private readonly context: vscode.ExtensionContext
+  ) {
+    this.markerTimeStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 97);
+    this.deltaTimeStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 98);
+    this.selectedSignalStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 99);
+
+    this.markerTimeStatusBarItem.command = 'vaporview.setTimeUnits';
+    this.markerTimeStatusBarItem.tooltip = 'Select Time Units';
+
+    this.context.subscriptions.push(this.markerTimeStatusBarItem);
+    this.context.subscriptions.push(this.deltaTimeStatusBarItem);
+    this.context.subscriptions.push(this.selectedSignalStatusBarItem);
+  }
+
+  public hide() {
+    this.markerTimeStatusBarItem.hide();
+    this.deltaTimeStatusBarItem.hide();
+    this.selectedSignalStatusBarItem.hide();
+  }
+
+  update(document: VaporviewDocument, event: WebviewStateEvent) {
+    //this.deltaTimeStatusBarItem.hide();
+    //this.markerTimeStatusBarItem.hide();
+    //this.selectedSignalStatusBarItem.hide();
+
+    if (!document) {return;}
+    const w = document.webviewContext;
+
+    //console.log(event);
+
+    const timeUnit = event.displayTimeUnit || w.displayTimeUnit;
+    if (w.markerTime || w.markerTime === 0) {
+      this.markerTimeStatusBarItem.text = 'Time: ' + document.formatTime(w.markerTime, timeUnit);
+      if (w.altMarkerTime !== null && w.markerTime !== null) {
+        const deltaT = w.markerTime - w.altMarkerTime;
+        this.deltaTimeStatusBarItem.text = 'Δt: ' + document.formatTime(deltaT, timeUnit)  + ' (' + timeHz(deltaT, document.metadata.timeUnit, 3) + ')';
+        this.deltaTimeStatusBarItem.show();
+      } else {
+        this.deltaTimeStatusBarItem.hide();
+      }
+    } else {
+      this.deltaTimeStatusBarItem.hide();
+      //this.markerTimeStatusBarItem.hide();
+      this.markerTimeStatusBarItem.text = 'Time Units: ' + timeUnit;
+    }
+    this.markerTimeStatusBarItem.show();
+
+    if (w.selectedSignal || w.selectedSignal === 0) {
+      const netlistData = document.netlistIdTable[w.selectedSignal];
+
+      if (netlistData) {
+        const signalName = netlistData.name;
+        this.selectedSignalStatusBarItem.text = 'Selected signal: ' + signalName;
+      } else {
+        this.selectedSignalStatusBarItem.hide();
+      }
+
+      if (event.transitionCount !== undefined && event.transitionCount !== null) {
+        const plural = event.transitionCount === 1 ? ')' : 's)';
+        this.selectedSignalStatusBarItem.text += ' (' + toStringWithCommas(event.transitionCount) + ' value change' + plural;
+      }
+      this.selectedSignalStatusBarItem.show();
+    } else if (event.selectedSignalCount !== undefined && event.selectedSignalCount > 1) {
+      this.selectedSignalStatusBarItem.text = event.selectedSignalCount + ' signals selected';
+    } else {
+      this.selectedSignalStatusBarItem.hide();
+    }
+  }
+
+}

@@ -1,0 +1,6 @@
+{
+  // trace-design-scope.test.cjs: two folders, only trace-scope/a sets designArgs; a dump outside both
+  // traces with a's design.
+  "folders": [{ "path": "trace-scope/a" }, { "path": "trace" }],
+  "settings": {}
+}

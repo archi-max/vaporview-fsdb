@@ -1,0 +1,431 @@
+$timescale 1ns $end
+$scope module xtb $end
+$var reg 1 ! clk $end
+$scope module u_small $end
+$var wire 1 ! clk $end
+$var wire 8 " pa [7:0] $end
+$var wire 24 % asc [23:0] $end
+$var wire 12 & p3 [11:0] $end
+$var wire 8 ' plain [7:0] $end
+$upscope $end
+$scope module u_mid $end
+$var wire 1 ! clk $end
+$var wire 1 ( m0 $end
+$var wire 1 ) m1 $end
+$var wire 1 * m2 $end
+$var wire 1 + m3 $end
+$var wire 1 , m4 $end
+$var wire 1 - m5 $end
+$var wire 1 . m6 $end
+$var wire 1 / m7 $end
+$var wire 1 0 m8 $end
+$var wire 1 1 m9 $end
+$var wire 1 2 m10 $end
+$var wire 1 3 m11 $end
+$var wire 1 4 m12 $end
+$var wire 1 5 m13 $end
+$var wire 1 6 m14 $end
+$var wire 1 7 m15 $end
+$var wire 1 8 m16 $end
+$var wire 1 9 m17 $end
+$var wire 1 : m18 $end
+$var wire 1 ; m19 $end
+$var wire 1 < m20 $end
+$var wire 1 = m21 $end
+$var wire 1 > m22 $end
+$var wire 1 ? m23 $end
+$var wire 1 @ m24 $end
+$var wire 1 A m25 $end
+$var wire 1 B m26 $end
+$var wire 1 C m27 $end
+$var wire 1 D m28 $end
+$var wire 1 E m29 $end
+$var wire 1 F m30 $end
+$var wire 1 G m31 $end
+$var wire 1 H m32 $end
+$var wire 1 I m33 $end
+$var wire 1 J m34 $end
+$var wire 1 K m35 $end
+$var wire 1 L m36 $end
+$var wire 1 M m37 $end
+$var wire 1 N m38 $end
+$var wire 1 O m39 $end
+$var wire 1 P m40 $end
+$var wire 1 Q m41 $end
+$var wire 1 R m42 $end
+$var wire 1 S m43 $end
+$var wire 1 T m44 $end
+$var wire 1 U m45 $end
+$var wire 1 V m46 $end
+$var wire 1 W m47 $end
+$var wire 1 X m48 $end
+$var wire 1 Y m49 $end
+$var wire 1 Z m50 $end
+$var wire 1 [ m51 $end
+$var wire 1 \ m52 $end
+$var wire 1 ] m53 $end
+$var wire 1 ^ m54 $end
+$var wire 1 _ m55 $end
+$var wire 1 ` m56 $end
+$var wire 1 a m57 $end
+$var wire 1 b m58 $end
+$var wire 1 c m59 $end
+$upscope $end
+$scope module u_wide $end
+$var wire 1 ! clk $end
+$var wire 1 d w0 $end
+$var wire 1 e w1 $end
+$var wire 1 f w2 $end
+$var wire 1 g w3 $end
+$var wire 1 h w4 $end
+$var wire 1 i w5 $end
+$var wire 1 j w6 $end
+$var wire 1 k w7 $end
+$var wire 1 l w8 $end
+$var wire 1 m w9 $end
+$var wire 1 n w10 $end
+$var wire 1 o w11 $end
+$var wire 1 p w12 $end
+$var wire 1 q w13 $end
+$var wire 1 r w14 $end
+$var wire 1 s w15 $end
+$var wire 1 t w16 $end
+$var wire 1 u w17 $end
+$var wire 1 v w18 $end
+$var wire 1 w w19 $end
+$var wire 1 x w20 $end
+$var wire 1 y w21 $end
+$var wire 1 z w22 $end
+$var wire 1 { w23 $end
+$var wire 1 | w24 $end
+$var wire 1 } w25 $end
+$var wire 1 ~ w26 $end
+$var wire 1 !" w27 $end
+$var wire 1 "" w28 $end
+$var wire 1 %" w29 $end
+$var wire 1 &" w30 $end
+$var wire 1 '" w31 $end
+$var wire 1 (" w32 $end
+$var wire 1 )" w33 $end
+$var wire 1 *" w34 $end
+$var wire 1 +" w35 $end
+$var wire 1 ," w36 $end
+$var wire 1 -" w37 $end
+$var wire 1 ." w38 $end
+$var wire 1 /" w39 $end
+$var wire 1 0" w40 $end
+$var wire 1 1" w41 $end
+$var wire 1 2" w42 $end
+$var wire 1 3" w43 $end
+$var wire 1 4" w44 $end
+$var wire 1 5" w45 $end
+$var wire 1 6" w46 $end
+$var wire 1 7" w47 $end
+$var wire 1 8" w48 $end
+$var wire 1 9" w49 $end
+$var wire 1 :" w50 $end
+$var wire 1 ;" w51 $end
+$var wire 1 <" w52 $end
+$var wire 1 =" w53 $end
+$var wire 1 >" w54 $end
+$var wire 1 ?" w55 $end
+$var wire 1 @" w56 $end
+$var wire 1 A" w57 $end
+$var wire 1 B" w58 $end
+$var wire 1 C" w59 $end
+$var wire 1 D" w60 $end
+$var wire 1 E" w61 $end
+$var wire 1 F" w62 $end
+$var wire 1 G" w63 $end
+$var wire 1 H" w64 $end
+$var wire 1 I" w65 $end
+$var wire 1 J" w66 $end
+$var wire 1 K" w67 $end
+$var wire 1 L" w68 $end
+$var wire 1 M" w69 $end
+$var wire 1 N" w70 $end
+$var wire 1 O" w71 $end
+$var wire 1 P" w72 $end
+$var wire 1 Q" w73 $end
+$var wire 1 R" w74 $end
+$var wire 1 S" w75 $end
+$var wire 1 T" w76 $end
+$var wire 1 U" w77 $end
+$var wire 1 V" w78 $end
+$var wire 1 W" w79 $end
+$var wire 1 X" w80 $end
+$var wire 1 Y" w81 $end
+$var wire 1 Z" w82 $end
+$var wire 1 [" w83 $end
+$var wire 1 \" w84 $end
+$var wire 1 ]" w85 $end
+$var wire 1 ^" w86 $end
+$var wire 1 _" w87 $end
+$var wire 1 `" w88 $end
+$var wire 1 a" w89 $end
+$var wire 1 b" w90 $end
+$var wire 1 c" w91 $end
+$var wire 1 d" w92 $end
+$var wire 1 e" w93 $end
+$var wire 1 f" w94 $end
+$var wire 1 g" w95 $end
+$var wire 1 h" w96 $end
+$var wire 1 i" w97 $end
+$var wire 1 j" w98 $end
+$var wire 1 k" w99 $end
+$var wire 1 l" w100 $end
+$var wire 1 m" w101 $end
+$var wire 1 n" w102 $end
+$var wire 1 o" w103 $end
+$var wire 1 p" w104 $end
+$var wire 1 q" w105 $end
+$var wire 1 r" w106 $end
+$var wire 1 s" w107 $end
+$var wire 1 t" w108 $end
+$var wire 1 u" w109 $end
+$var wire 1 v" w110 $end
+$var wire 1 w" w111 $end
+$var wire 1 x" w112 $end
+$var wire 1 y" w113 $end
+$var wire 1 z" w114 $end
+$var wire 1 {" w115 $end
+$var wire 1 |" w116 $end
+$var wire 1 }" w117 $end
+$var wire 1 ~" w118 $end
+$var wire 1 !% w119 $end
+$var wire 1 "% w120 $end
+$var wire 1 %% w121 $end
+$var wire 1 &% w122 $end
+$var wire 1 '% w123 $end
+$var wire 1 (% w124 $end
+$var wire 1 )% w125 $end
+$var wire 1 *% w126 $end
+$var wire 1 +% w127 $end
+$var wire 1 ,% w128 $end
+$var wire 1 -% w129 $end
+$var wire 1 .% w130 $end
+$var wire 1 /% w131 $end
+$var wire 1 0% w132 $end
+$var wire 1 1% w133 $end
+$var wire 1 2% w134 $end
+$var wire 1 3% w135 $end
+$var wire 1 4% w136 $end
+$var wire 1 5% w137 $end
+$var wire 1 6% w138 $end
+$var wire 1 7% w139 $end
+$upscope $end
+$upscope $end
+$enddefinitions $end
+#0
+0!
+b01011010 "
+b000100100011010001010110 %
+b100111000011 &
+b00000001 '
+0(
+0)
+0*
+0+
+0,
+0-
+0.
+0/
+00
+01
+02
+03
+04
+05
+06
+07
+08
+09
+0:
+0;
+0<
+0=
+0>
+0?
+0@
+0A
+0B
+0C
+0D
+0E
+0F
+0G
+0H
+0I
+0J
+0K
+0L
+0M
+0N
+0O
+0P
+0Q
+0R
+0S
+0T
+0U
+0V
+0W
+0X
+0Y
+0Z
+0[
+0\
+0]
+0^
+0_
+0`
+0a
+0b
+0c
+0d
+0e
+0f
+0g
+0h
+0i
+0j
+0k
+0l
+0m
+0n
+0o
+0p
+0q
+0r
+0s
+0t
+0u
+0v
+0w
+0x
+0y
+0z
+0{
+0|
+0}
+0~
+0!"
+0""
+0%"
+0&"
+0'"
+0("
+0)"
+0*"
+0+"
+0,"
+0-"
+0."
+0/"
+00"
+01"
+02"
+03"
+04"
+05"
+06"
+07"
+08"
+09"
+0:"
+0;"
+0<"
+0="
+0>"
+0?"
+0@"
+0A"
+0B"
+0C"
+0D"
+0E"
+0F"
+0G"
+0H"
+0I"
+0J"
+0K"
+0L"
+0M"
+0N"
+0O"
+0P"
+0Q"
+0R"
+0S"
+0T"
+0U"
+0V"
+0W"
+0X"
+0Y"
+0Z"
+0["
+0\"
+0]"
+0^"
+0_"
+0`"
+0a"
+0b"
+0c"
+0d"
+0e"
+0f"
+0g"
+0h"
+0i"
+0j"
+0k"
+0l"
+0m"
+0n"
+0o"
+0p"
+0q"
+0r"
+0s"
+0t"
+0u"
+0v"
+0w"
+0x"
+0y"
+0z"
+0{"
+0|"
+0}"
+0~"
+0!%
+0"%
+0%%
+0&%
+0'%
+0(%
+0)%
+0*%
+0+%
+0,%
+0-%
+0.%
+0/%
+00%
+01%
+02%
+03%
+04%
+05%
+06%
+07%
+#10
+1!
+b10100101 "
+b001101000101011000010010 %
+b100111000100 &
+b00000010 '
+#20

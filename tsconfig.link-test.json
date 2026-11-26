@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "declaration": false,
+    "declarationMap": false,
+    "outDir": "./out/link-test",
+    "sourceMap": false,
+    "types": ["node"]
+  },
+  "include": [
+    "src/cmux/link/profiles.ts",
+    "src/cmux/link/test/profiles.test.ts",
+    "src/cmux/link/point_value.ts",
+    "src/cmux/link/test/point_value.test.ts",
+    "src/cmux/link/literals.ts",
+    "src/cmux/shared/value_format.ts",
+    "src/cmux/link/test/literals.test.ts"
+  ]
+}

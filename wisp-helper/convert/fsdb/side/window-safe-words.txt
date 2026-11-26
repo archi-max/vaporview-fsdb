@@ -1,0 +1,60 @@
+# SPDX-License-Identifier: MIT
+# window-safe-words.txt (file-only route, window evaluation): the proven words whose result at a time depends only on the
+# input values at that time, so a window [t0, t1] computes them from each input's value at t0 and its rows in (t0, t1].
+# Basis: every instruction of derive_eval.h is applied per merge time (merge, apply, multi, the program interpreter) and
+# keeps no state across times. A word that is not listed here is refused by name in a window (not window-safe: <word>).
+# A new proven word is added here only with a window identity test (window = the whole-history values cut to the window).
+COPY
+u95
+bsel
+Q1
+psel
+WIDTH
+CALL_ARG_VAL
+OPT_CONST
+M_EQU
+b83
+MITECONDNOINSTR
+u82
+AND
+NOT
+SLICE
+b84
+OR
+EQU
+M_NEQU
+CONCATENATE
+SHIFT_L
+PAD
+OUTRANGE
+MULTI_CONCATENATE
+CONST
+XOR
+concat
+PWRITE
+M_LT
+XNOR
+ADD
+b85
+LOGAND
+TUPLE
+M_GT
+LOGOR
+SUBTRACT
+LIT
+TEMPLATE_BY_WIDTH
+OCONST
+M_GE
+M_LE
+SM_LT
+SHIFT_R
+LNOT
+SM_GE
+OPT_CONST_4ST
+SASHIFT_R
+RESOLVE
+RESOLVE_WOR
+RESOLVE_WAND
+Q3
+ub9
+CONCAT_POS_pos

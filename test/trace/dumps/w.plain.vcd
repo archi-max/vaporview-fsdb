@@ -1,0 +1,135 @@
+$date
+	fixture
+$end
+
+$version
+	Verilog simulator
+$end
+
+$timescale
+	1ns
+$end
+
+$comment Csum: 1 6068f914c3d1566b $end
+
+
+$scope module tb_w $end
+$var reg 1 ! clk $end
+$var reg 4 " d [3:0] $end
+$var reg 4 # m [3:0] $end
+$var reg 4 $ e [3:0] $end
+$var reg 4 % n [3:0] $end
+$var reg 4 & qa [3:0] $end
+$var reg 4 ' qo [3:0] $end
+
+$scope module t_and $end
+$var reg 1 ( clk $end
+$var reg 4 ) d [3:0] $end
+$var reg 4 * m [3:0] $end
+$var reg 4 + qa [3:0] $end
+$upscope $end
+
+
+$scope module t_or $end
+$var reg 1 , clk $end
+$var reg 4 - e [3:0] $end
+$var reg 4 . n [3:0] $end
+$var reg 4 / qo [3:0] $end
+$upscope $end
+
+$upscope $end
+
+$enddefinitions $end
+
+#0
+$dumpvars
+0!
+b0000 "
+b1111 $
+b1111 #
+b0000 %
+bxxxx &
+bxxxx '
+b0000 )
+b1111 *
+bxxxx +
+b1111 -
+b0000 .
+bxxxx /
+0(
+0,
+$end
+#5
+1!
+1(
+1,
+b0000 +
+b0000 &
+b1111 /
+b1111 '
+#10
+0!
+0(
+0,
+#15
+1!
+1(
+1,
+#20
+0!
+0(
+0,
+#25
+1!
+1(
+1,
+#30
+0!
+0(
+0,
+#35
+1!
+1(
+1,
+#40
+0!
+0(
+0,
+#42
+b1011 #
+b1011 *
+b0010 %
+b0010 .
+#45
+1!
+1(
+1,
+#50
+0!
+0(
+0,
+#52
+b1111 #
+b1111 *
+b0000 %
+b0000 .
+#55
+1!
+1(
+1,
+#60
+0!
+0(
+0,
+#65
+1!
+1(
+1,
+#70
+0!
+0(
+0,
+#75
+1!
+1(
+1,

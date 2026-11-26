@@ -1,0 +1,1235 @@
+import { type NetlistId, SignalId, type RowId, EnumData, EnumEntry, QueueEntry, SignalQueueEntry, type EnumQueueEntry, NameType, StateChangeType, CollapseState, VariableEncoding, type BitRangeSource, type SavedRowItem, type AddVariableSignal, type SetDisplayFormatMessage, type EditSignalGroupMessage } from '../common/types';
+import { bitRangeString, createInstancePath } from '../common/functions';
+import { ActionType, type EventHandler } from './event_handler';
+import { dataManager, viewerState, getParentGroupId, labelsPanel, controlBar, getIndexInGroup, viewport, vscodeWrapper, styles } from './vaporview';
+import { NetlistVariable, type RowItem, SignalGroup, SignalSeparator, CustomVariable, isAnalogSignal, SliceGroup, sliceGroupOf, type SlicedVariable } from './signal_item'; // cmux: slices
+import { BinaryWaveformRenderer, MultiBitWaveformRenderer, LinearWaveformRenderer } from './renderer';
+import type { WaveformData } from './data_manager';
+import { type ValueFormat, getNumberFormatById } from './value_format';
+
+interface ApplyStateSettings {
+  displayedSignals: (SavedRowItem & Record<string, unknown>)[];
+  markerTime?: number;
+  altMarkerTime?: number;
+  displayTimeUnit?: string;
+  selectedSignal?: number;
+  zoomRatio?: number;
+  scrollLeft?: number;
+  defaultPixelTime?: number;
+}
+
+// cmux: one slice (Split, Add Slice): bits msb..lsb of its row, counted from 0, and its own slices.
+export type SlicePart = {msb: number, lsb: number, name: string, parts?: SlicePart[]};
+
+const FORMAT_SLICE_MIN = 2000; // vscode-port: values formatted in one go; longer signals are sliced
+const FORMAT_SLICE_MS  = 8;    // vscode-port: one slice's budget
+
+export class RowHandler {
+
+  rowItems: RowItem[]         = []; // rowId is the key/index, RowItem is the value
+  groupIdTable: RowId[]       = []; // group ID is the key/index, rowId is the value
+  private nextRowId: number   = 0;
+  private nextGroupId: number = 1;
+
+  constructor(private events: EventHandler) {
+
+    this.handleColorChange = this.handleColorChange.bind(this);
+    this.handleReorderSignals = this.handleReorderSignals.bind(this);
+    this.handleRemoveVariable = this.handleRemoveVariable.bind(this);
+
+    this.events.subscribe(ActionType.UpdateColorTheme, this.handleColorChange);
+    this.events.subscribe(ActionType.ReorderSignals, this.handleReorderSignals);
+    this.events.subscribe(ActionType.RemoveVariable, this.handleRemoveVariable);
+  }
+
+  unload() {
+    this.rowItems     = [];
+    this.groupIdTable = [];
+    this.nextRowId    = 0;
+    this.nextGroupId  = 1;
+    labelsPanel.valueAtMarker = {};
+  }
+
+  private flushRowCache(force: boolean) {
+    if (viewerState.displayedSignalsFlat.length === 0 || force) {
+      this.unload();
+    }
+  }
+
+  getGroupByIdOrName(groupPath: string[] | undefined, parentGroupId: number | undefined): SignalGroup | null {
+    let groupId = 0;
+    const groupIsValid = false;
+
+    if (parentGroupId !== undefined) {
+      groupId = parentGroupId;
+    } else if (groupPath !== undefined && groupPath.length > 0) {
+      groupId = this.findGroupIdByNamePath(groupPath);
+    }
+
+    if (groupId > 0) {
+      const parentGroupRowId = this.groupIdTable[groupId];
+      if (parentGroupRowId === undefined) {return null;}
+      const parentGroupItem = this.rowItems[parentGroupRowId];
+
+      if (parentGroupItem instanceof SignalGroup) {
+        return parentGroupItem;
+      } else {
+        return null;
+      }
+    }
+    return null;
+  }
+
+  getChildrenByGroupId(groupId: number) {
+    if (groupId === 0) {
+      return viewerState.displayedSignals;
+    }
+    const groupRowId = this.groupIdTable[groupId];
+    const groupItem = this.rowItems[groupRowId];
+    if (!(groupItem instanceof SignalGroup)) {
+      return [];
+    }
+    return groupItem.children;
+  }
+
+  getRowIdsFromNetlistId(netlistId: NetlistId): RowId[] {
+    return viewerState.displayedSignalsFlat.filter((rowId) => {
+      const data = this.rowItems[rowId];
+      if (!(data instanceof NetlistVariable)) {return false;}
+      return data.netlistId === netlistId;
+    });
+  }
+
+  updateDisplayedSignalsFlat() {
+    viewerState.displayedSignalsFlat = [];
+    viewerState.visibleSignalsFlat = [];
+    viewerState.displayedSignals.forEach((rowId) => {
+      const signalItem = this.rowItems[rowId];
+      viewerState.displayedSignalsFlat = viewerState.displayedSignalsFlat.concat(signalItem.getFlattenedRowIdList(false, -1));
+      viewerState.visibleSignalsFlat = viewerState.visibleSignalsFlat.concat(signalItem.getFlattenedRowIdList(true, -1));
+    });
+    this.updateBounds();
+  }
+
+  updateBounds() {
+    viewerState.displayedSignalsFlat.forEach((rowId) => {
+      this.rowItems[rowId].topBounds = null;
+    });
+    let topBounds      = 0;
+    let bottomBounds   = 0;
+    viewerState.visibleSignalsFlat.forEach((rowId) => {
+      const rowItem     = this.rowItems[rowId];
+      const rowHeight   = rowItem.rowHeight * styles.rowHeight;
+      topBounds         = bottomBounds;
+      bottomBounds      = topBounds + rowHeight;
+      rowItem.topBounds = topBounds;
+    });
+  }
+
+  addVariable(signalList: AddVariableSignal[], groupPath: string[] | undefined, parentGroupId: number | undefined, index: number | undefined, selectLast = false) { // vscode-port: selectLast
+    // Handle rendering a signal, e.g., render the signal based on message content
+
+    if (signalList.length === 0) {return;}
+
+    let updateFlag     = false;
+    //let selectedSignal = viewerState.selectedSignal;
+    const signalIdList: SignalQueueEntry[]  = [];
+    const enumTableList: EnumQueueEntry[] = [];
+    const netlistIdList: number[] = [];
+    const rowIdList: number[]     = [];
+    const moveList: number[]      = [];
+    let lastRowId: number | null = null;
+
+    signalList.forEach((signal: AddVariableSignal) => {
+
+      const netlistId = signal.netlistId;
+      const signalId  = signal.signalId;
+      const enumType  = signal.enumType;
+      const rowId     = this.nextRowId;
+      lastRowId       = rowId;
+      this.nextRowId++;
+
+      moveList.push(rowId);
+
+      if (viewerState.displayedSignalsFlat.includes(rowId)) {
+        return; // Signal already displayed, skip it
+      }
+
+      rowIdList.push(rowId);
+
+      const varItem = new NetlistVariable(
+        rowId,
+        netlistId,
+        signalId,
+        signal.signalName,
+        signal.scopePath,
+        signal.signalWidth,
+        signal.type,
+        signal.encoding as VariableEncoding,
+        signal.signalWidth === 1 ? new BinaryWaveformRenderer() : new MultiBitWaveformRenderer(),
+        enumType || "",
+        signal.msb,
+        signal.lsb,
+      );
+
+      this.rowItems[rowId] = varItem;
+      if (netlistId !== undefined) {
+        netlistIdList.push(netlistId);
+      }
+
+      // Check for value change data
+      if (signalId === undefined) {
+        //do nothing
+      } else if (dataManager.valueChangeData[signalId] !== undefined) {
+        //selectedSignal = [rowId];
+        if (!this.events.isBatchMode) {
+          updateFlag     = true;
+        }
+        const data = varItem.getWaveformData();
+        this.setValueFormat(data, varItem.valueFormat, false);
+        labelsPanel.valueAtMarker[rowId] = varItem.getValueAtTime(viewerState.markerTime);
+      } else {
+        const signalQueueEntry: SignalQueueEntry = {
+          type: 'signal',
+          signalWidth: signal.signalWidth,
+          signalId: signalId,
+          rowId: rowId,
+        };
+        signalIdList.push(signalQueueEntry);
+      }
+
+      // Check for enum type
+      if (enumType !== undefined && enumType !== "" ) {
+        if (dataManager.enumTable[enumType] === undefined) {
+          enumTableList.push({type: 'enum', name: enumType, netlistId: netlistId} as EnumQueueEntry);
+        }
+      }
+    });
+
+    dataManager.requestData(signalIdList, enumTableList);
+    viewerState.displayedSignals = viewerState.displayedSignals.concat(rowIdList);
+    this.updateDisplayedSignalsFlat();
+    this.events.addVariable(rowIdList, updateFlag);
+
+    let reorder = false;
+    let groupId = 0;
+    let moveIndex = 0;
+
+    // If a location was specified, use it
+    const groupItem = this.getGroupByIdOrName(groupPath, parentGroupId);
+    if (groupItem !== null) {
+      groupId = groupItem.groupId;
+      moveIndex = groupItem.children.length;
+      reorder = true;
+    } else if (parentGroupId === 0) {
+      moveIndex = viewerState.displayedSignalsFlat.length;
+      groupId = 0;
+      reorder = true;
+    }
+
+    if (index !== undefined) {
+      moveIndex = Math.max(index, 0);
+      reorder = true;
+    }
+
+    // If no location was specified, move the signal to below the selected signal
+    if (!reorder && viewerState.selectedSignal.length === 1) {
+      const selectedRowId = viewerState.selectedSignal[0];
+      groupId = getParentGroupId(selectedRowId) || 0;
+      moveIndex = (getIndexInGroup(selectedRowId, groupId) || 0) + 1;
+      reorder = true;
+    }
+
+    if (reorder) {
+      this.events.reorderSignals(moveList, groupId, moveIndex);
+    }
+
+    // vscode-port: selectLast (coalesced single adds): only the last row is selected, as when they were added one by one
+    this.events.signalSelect(selectLast && lastRowId !== null && rowIdList.includes(lastRowId) ? [lastRowId] : rowIdList, lastRowId);
+
+    //console.log('addVariable');
+    vscodeWrapper.sendWebviewContext(StateChangeType.User);
+    return rowIdList;
+  }
+
+  createUniqueGroupName(name: string, parentGroupId: number): string {
+    let groupName = name;
+    let n = 1;
+    if (this.findGroupIdByName(groupName, parentGroupId) == -1) {
+      return groupName;
+    }
+
+    while (this.findGroupIdByName(groupName, parentGroupId) !== -1) {
+      groupName = name + ` (${n})`;
+      n++;
+    }
+    return groupName;
+  }
+
+  addSignalGroup(name: string | undefined, groupPath: string[] | undefined, inputParentGroupId: number | undefined, eventRowId: number | undefined, moveSelected: boolean, showRenameInput: boolean): number | undefined {
+    if (controlBar.searchInFocus || labelsPanel.renameActive) {return;}
+
+    const groupId = this.nextGroupId;
+    const rowId = this.nextRowId;
+
+    let parentGroupId = 0;
+    let reorder = false;
+    let index = viewerState.displayedSignalsFlat.length;
+    const parentGroup = this.getGroupByIdOrName(groupPath, inputParentGroupId);
+    if (eventRowId !== undefined || moveSelected) {
+      // Command was sent via keybinding, or right clicking on an empty area
+      let targetRowId = eventRowId;
+      if (targetRowId === undefined) {
+        targetRowId = viewerState.selectedSignal[0];
+      }
+      parentGroupId = getParentGroupId(targetRowId) || 0;
+      const parentGroupChildren = this.getChildrenByGroupId(parentGroupId);
+      if (targetRowId !== undefined) {
+        index = parentGroupChildren.indexOf(targetRowId);
+      }
+      reorder = true;
+    } else if (parentGroup !== null) {
+      // Command was sent to reload session
+      parentGroupId = parentGroup.groupId;
+      index = parentGroup.children.length;
+      reorder = true;
+    }
+
+    let groupName = name || "";
+    if (name === undefined || name === "") {
+      groupName = "Group " + groupId;
+    }
+
+    groupName = this.createUniqueGroupName(groupName, parentGroupId);
+    viewerState.displayedSignals = viewerState.displayedSignals.concat(rowId);
+    const groupItem = new SignalGroup(rowId, groupName, groupId);
+    this.groupIdTable[groupId] = rowId;
+    this.rowItems[rowId] = groupItem;
+
+    this.updateDisplayedSignalsFlat();
+    this.events.addVariable([rowId], false);
+
+    let moveValid = true;
+    if (moveSelected && viewerState.selectedSignal.length > 0) {
+      //this.events.reorderSignals(viewerState.selectedSignal, groupId, 0);
+      const filteredRowIdList = this.removeChildrenFromSignalList(viewerState.selectedSignal);
+      const parentGroupRowId = this.groupIdTable[parentGroupId];
+      filteredRowIdList.forEach((id) => {
+        const item = this.rowItems[id];
+        const childItems = item.getFlattenedRowIdList(false, -1);
+        if (childItems.includes(parentGroupRowId)) {moveValid = false;}
+      });
+    }
+
+    if (reorder && moveValid) {
+      this.events.reorderSignals([rowId], parentGroupId, index);
+    }
+
+    if (moveSelected && viewerState.selectedSignal.length > 1) {
+      this.events.reorderSignals(viewerState.selectedSignal, groupId, 0);
+    } else {
+      this.events.signalSelect([rowId], rowId);
+    }
+
+    if (showRenameInput) {labelsPanel.showRenameInput(rowId);}
+
+    //('addSignalGroup');
+    vscodeWrapper.sendWebviewContext(StateChangeType.User);
+
+    this.nextGroupId++;
+    this.nextRowId++;
+    return rowId;
+  }
+
+  addSeparator(name: string | undefined, groupPath: string[] | undefined, parentGroupId: number | undefined, eventRowId: number | undefined, moveSelected: boolean) {
+    if (controlBar.searchInFocus || labelsPanel.renameActive) {return;}
+    const rowId = this.nextRowId;
+    this.nextRowId++;
+
+    viewerState.displayedSignals = viewerState.displayedSignals.concat(rowId);
+    const separatorItem = new SignalSeparator(rowId, name || "---");
+    this.rowItems[rowId] = separatorItem;
+    this.updateDisplayedSignalsFlat();
+    this.events.addVariable([rowId], false);
+
+    let reorder = false;
+    let index = viewerState.displayedSignalsFlat.length;
+    const parentGroup = this.getGroupByIdOrName(groupPath, parentGroupId);
+    if (eventRowId !== undefined) {
+      parentGroupId = getParentGroupId(eventRowId) || 0;
+      const parentGroupChildren = this.getChildrenByGroupId(parentGroupId);
+      index = parentGroupChildren.indexOf(eventRowId) + 1;
+      reorder = true;
+    } else if (parentGroup !== null) {
+      parentGroupId = parentGroup.groupId;
+      index = parentGroup.children.length;
+      reorder = true;
+    }
+
+    if (reorder) {
+      this.events.reorderSignals([rowId], parentGroupId ?? 0, index);
+    }
+
+    this.events.signalSelect([rowId], rowId);
+    //console.log('addSeparator');
+    vscodeWrapper.sendWebviewContext(StateChangeType.User);
+    return rowId;
+  }
+
+  newCustomVariableSource(rowId: number | undefined, netlistId: NetlistId | undefined, msb: number, lsb: number) {
+    // get the source signal item
+    let sourceSignalItem: RowItem | undefined;
+    if (rowId !== undefined) {
+      sourceSignalItem = this.rowItems[rowId];
+    } else if (netlistId !== undefined) {
+      const signalItems = this.getRowIdsFromNetlistId(netlistId);
+      if (signalItems.length > 0) {
+        sourceSignalItem = this.rowItems[signalItems[0]];
+      }
+    }
+
+    if (!(sourceSignalItem instanceof NetlistVariable)) {return;}
+    if (lsb >= sourceSignalItem.signalWidth) {return;}
+    if (msb >= sourceSignalItem.signalWidth) {return;}
+    const sourceSignalId = sourceSignalItem.signalId;
+
+    // Create custom signal
+    const source: BitRangeSource = {
+      name: createInstancePath(sourceSignalItem.scopePath, sourceSignalItem.signalName),
+      netlistId: sourceSignalItem.netlistId,
+      signalId: sourceSignalId,
+      signalWidth: sourceSignalItem.signalWidth,
+      msb: Math.min(msb, sourceSignalItem.signalWidth - 1),
+      lsb: Math.max(lsb, 0),
+    };
+    return source;
+  }
+
+  addCustomVariable(name: string | undefined, groupPath: string[] | undefined, parentGroupId: number | undefined, eventRowId: number | undefined, netlistId: NetlistId | undefined, msb: number, lsb: number, inputSource: BitRangeSource | undefined) {
+    //console.log('addCustomVariable', name, groupPath, parentGroupId, eventRowId, netlistId, msb, lsb);
+    if (controlBar.searchInFocus || labelsPanel.renameActive) {return;}
+    const rowId = this.nextRowId;
+    this.nextRowId++;
+
+    const source = inputSource || this.newCustomVariableSource(eventRowId, netlistId, msb, lsb);
+    if (source === undefined) {return;}
+
+    const sourceSignalId = source.signalId;
+    const customSignalId = dataManager.newCustomSignal([source]);
+    const width          = source.msb - source.lsb + 1;
+    const signalName     = source.name + bitRangeString(source.msb, source.lsb, false);
+    const renderType     = width === 1 ? new BinaryWaveformRenderer() : new MultiBitWaveformRenderer();
+    const customVariable = new CustomVariable(rowId, [source], customSignalId, signalName, width, renderType);
+    this.rowItems[rowId] = customVariable;
+
+    if (customSignalId !== undefined && sourceSignalId !== undefined) {
+      const customSignalData = dataManager.customValueChangeData[customSignalId];
+      if (!customSignalData) {return;}
+      let drawFlag = false;
+      if (customSignalData.dataLoaded) {
+        //console.log('custom signal found and loaded', customSignalId);
+        drawFlag = true;
+      } else if (dataManager.valueChangeData[sourceSignalId] !== undefined) {
+        dataManager.updateCustomSignal(customSignalId);
+        drawFlag = true;
+      } else {
+        const signalQueueEntry: SignalQueueEntry = {
+          type: 'signal',
+          signalWidth: source.signalWidth,
+          signalId: sourceSignalId,
+          rowId: rowId,
+          customSignalId: customSignalId,
+        };
+        dataManager.requestData([signalQueueEntry], []);
+      }
+
+      if (drawFlag) {
+        this.setValueFormat(customVariable.getWaveformData(), customVariable.valueFormat, false);
+        labelsPanel.valueAtMarker[rowId] = customVariable.getValueAtTime(viewerState.markerTime);
+      }
+    }
+
+    viewerState.displayedSignals = viewerState.displayedSignals.concat(rowId);
+    this.updateDisplayedSignalsFlat();
+    this.events.addVariable([rowId], false);
+
+    let reorder = false;
+    let index = viewerState.displayedSignalsFlat.length;
+    const parentGroup = this.getGroupByIdOrName(groupPath, parentGroupId);
+    if (parentGroup !== null) {
+      parentGroupId = parentGroup.groupId;
+      index = parentGroup.children.length;
+      reorder = true;
+    } else if (eventRowId !== undefined) {
+      parentGroupId = getParentGroupId(eventRowId) || 0;
+      const parentGroupChildren = this.getChildrenByGroupId(parentGroupId);
+      index = parentGroupChildren.indexOf(eventRowId) + 1;
+      reorder = true;
+    }
+
+    if (reorder) {
+      this.events.reorderSignals([rowId], parentGroupId ?? 0, index);
+    }
+
+    this.events.signalSelect([rowId], rowId);
+    //console.log('addCustomVariable');
+    vscodeWrapper.sendWebviewContext(StateChangeType.User);
+    return rowId;
+  }
+
+  addAllBitSlices(name: string | undefined, groupPath: string[] | undefined, parentGroupId: number | undefined, eventRowId: number | undefined, bitWidth: number) {
+
+    if (eventRowId === undefined) {return;}
+    const signalItem = this.rowItems[eventRowId];
+    if (signalItem === undefined) {return;}
+    if (!(signalItem instanceof NetlistVariable)) {return;}
+    const signalWidth = signalItem.signalWidth;
+    const signalName = createInstancePath(signalItem.scopePath, signalItem.signalName) + bitRangeString(signalWidth - 1, 0, false);
+
+    // Create a group for the bit slices
+    this.events.enterBatchMode();
+    const groupRowId = this.addSignalGroup(signalName, groupPath, parentGroupId, eventRowId, false, false);
+    let groupId = parentGroupId;
+
+    if (groupRowId === undefined) {
+      this.events.exitBatchMode();
+      return;
+    }
+
+    const groupItem = this.rowItems[groupRowId];
+    if (groupItem instanceof SignalGroup) {
+      groupId = groupItem.groupId;
+    }
+
+    const numSlices = Math.ceil(signalWidth / bitWidth);
+
+    for (let i = numSlices; i > 0; i--) {
+      const msb = Math.min(i * bitWidth - 1, signalWidth - 1);
+      const lsb = (i - 1) * bitWidth;
+      //console.log('addAllBitSlices - msb:', msb, "lsb:", lsb);
+      this.addCustomVariable(undefined, groupPath, groupId, eventRowId, undefined, msb, lsb, undefined);
+    }
+
+    const eventGroupId = getParentGroupId(eventRowId);
+    const eventIndex = getIndexInGroup(eventRowId, eventGroupId);
+    this.events.reorderSignals([groupRowId], eventGroupId ?? 0, eventIndex + 1);
+
+    this.events.exitBatchMode();
+    //console.log('addAllBitSlices');
+    vscodeWrapper.sendWebviewContext(StateChangeType.User);
+  }
+
+  // cmux: slices (Split, Add Slice). The page (cmux-commands.js) checks the parts and
+  // names them; each is a custom variable of the row's bits, in the SliceGroup the row
+  // owns (signal_item.ts), placed after the row's other slices. `parts` count bits of
+  // the row from 0; a slice's slices are bits of the same source signal.
+  addSlices(rowId: RowId | undefined, parts: SlicePart[]) {
+    if (rowId === undefined) {return;}
+    const item = this.rowItems[rowId];
+    if (!(item instanceof NetlistVariable) && !(item instanceof CustomVariable)) {return;}
+    if (!Array.isArray(parts) || !parts.some((p) => this.validPart(p, item.signalWidth))) {return;}
+    this.events.enterBatchMode();
+    this.addSliceParts(item, parts);
+    item.setSignalContextAttribute();
+    this.updateDisplayedSignalsFlat();
+    this.events.signalSelect([rowId], rowId);
+    this.events.exitBatchMode();
+    vscodeWrapper.sendWebviewContext(StateChangeType.User);
+  }
+
+  private validPart(p: SlicePart, width: number): boolean {
+    return !!p && Number.isInteger(p.msb) && Number.isInteger(p.lsb) && p.lsb >= 0 && p.msb >= p.lsb && p.msb < width;
+  }
+
+  // `parts` of `item`'s bits, and each part's own `parts` of its bits (By Declared Dimensions).
+  private addSliceParts(item: SlicedVariable, parts: SlicePart[]) {
+    const base = this.sliceSource(item);
+    if (base === undefined) {return;}
+    const valid = parts.filter((p) => this.validPart(p, item.signalWidth));
+    if (valid.length === 0) {return;}
+    const group = this.sliceGroup(item);
+    valid.forEach((p) => {
+      const source: BitRangeSource = Object.assign({}, base, {msb: base.lsb + p.msb, lsb: base.lsb + p.lsb});
+      const sliceRowId = this.addCustomVariable(undefined, undefined, group.groupId, undefined, undefined, source.msb, source.lsb, source);
+      const slice = sliceRowId === undefined ? undefined : this.rowItems[sliceRowId];
+      if (!(slice instanceof CustomVariable)) {return;}
+      if (p.name) {
+        slice.customName = String(p.name);
+        slice.nameType = NameType.custom;
+        slice.setSignalContextAttribute();
+      }
+      if (Array.isArray(p.parts) && p.parts.length) {
+        this.addSliceParts(slice, p.parts);
+        slice.setSignalContextAttribute();
+      }
+    });
+    group.collapseState = CollapseState.Expanded;
+  }
+
+  removeSlices(rowId: RowId | undefined) {
+    if (rowId === undefined) {return;}
+    const item = this.rowItems[rowId];
+    if (!(item instanceof NetlistVariable) && !(item instanceof CustomVariable)) {return;}
+    const group = sliceGroupOf(item);
+    if (!group) {return;}
+    const slices = group.children.slice();
+    this.events.enterBatchMode();
+    if (slices.length) {this.events.removeVariable(slices, true);}
+    this.rowItems[group.rowId]?.dispose();
+    delete this.rowItems[group.rowId];
+    item.sliceGroupId = 0;
+    item.setSignalContextAttribute();
+    this.updateDisplayedSignalsFlat();
+    this.events.signalSelect([rowId], rowId);
+    this.events.exitBatchMode();
+    vscodeWrapper.sendWebviewContext(StateChangeType.User);
+  }
+
+  // The bits a row's slices are cut from: a variable's signal, or a slice's own range of it.
+  private sliceSource(item: SlicedVariable): BitRangeSource | undefined {
+    if (item instanceof NetlistVariable) {
+      if (item.signalId === undefined) {return undefined;}
+      return {name: createInstancePath(item.scopePath, item.signalName), netlistId: item.netlistId, signalId: item.signalId,
+        signalWidth: item.signalWidth, msb: item.signalWidth - 1, lsb: 0};
+    }
+    if (item.source.length !== 1 || item.source[0].signalId === undefined) {return undefined;}
+    return Object.assign({}, item.source[0]);
+  }
+
+  // The row's SliceGroup, made (with no row of its own) on its first slice.
+  private sliceGroup(item: SlicedVariable): SliceGroup {
+    const existing = sliceGroupOf(item);
+    if (existing) {return existing;}
+    const groupRowId = this.nextRowId++;
+    const groupId    = this.nextGroupId++;
+    const group      = new SliceGroup(groupRowId, '', groupId, item.rowId);
+    this.rowItems[groupRowId] = group;
+    this.groupIdTable[groupId] = groupRowId;
+    item.sliceGroupId = groupId;
+    return group;
+  }
+
+  // Every row a row's slices hold: the groups and the slices, nested ones too.
+  private sliceRows(item: RowItem): RowId[] {
+    if (!(item instanceof NetlistVariable) && !(item instanceof CustomVariable)) {return [];}
+    const group = sliceGroupOf(item);
+    if (!group) {return [];}
+    const result: RowId[] = [group.rowId];
+    group.children.forEach((id) => {
+      const child = this.rowItems[id];
+      result.push(id);
+      if (child) {result.push(...this.sliceRows(child));}
+    });
+    return result;
+  }
+
+  // A saved row's slices (SavedSlices) come back under it, collapsed if they were.
+  private restoreSlices(rowId: RowId, signal: SavedRowItem & Record<string, unknown>) {
+    const saved = (signal as {cmuxSlices?: {collapseState: number, children: (SavedRowItem & Record<string, unknown>)[]}}).cmuxSlices;
+    if (!saved || !Array.isArray(saved.children) || saved.children.length === 0) {return;}
+    const item = this.rowItems[rowId];
+    if (!(item instanceof NetlistVariable) && !(item instanceof CustomVariable)) {return;}
+    const group = this.sliceGroup(item);
+    this.addSignalList(saved.children.filter((c) => c && c.dataType === 'custom-variable'), group.groupId);
+    if (saved.collapseState === CollapseState.Collapsed) {group.collapseState = CollapseState.Collapsed;}
+    item.setSignalContextAttribute();
+    this.updateDisplayedSignalsFlat();
+  }
+
+  addSignalList(signalList: (SavedRowItem & Record<string, unknown>)[], parentGroupId: number | undefined) {
+    signalList.forEach((signal) => {
+      if (signal.dataType === 'signal-group') {
+        const groupRowId = this.addSignalGroup(signal.groupName, undefined, parentGroupId, undefined, false, false);
+        let groupId = parentGroupId;
+        if (groupRowId === undefined) {return;}
+        const groupItem = this.rowItems[groupRowId];
+        if (groupItem instanceof SignalGroup) {
+          groupId = groupItem.groupId;
+        }
+        labelsPanel.cancelRename();
+        this.addSignalList(signal.children, groupId);
+        if (signal.collapseState === CollapseState.Collapsed && groupItem instanceof SignalGroup) {
+          //groupItem.collapse();
+          groupItem.collapseState = signal.collapseState;
+        }
+      } else if (signal.dataType === 'signal-separator') {
+        this.addSeparator(signal.label, undefined, parentGroupId, undefined, false);
+      } else if (signal.dataType === 'netlist-variable') {
+        const rowIdList = this.addVariable([signal as unknown as AddVariableSignal], undefined, parentGroupId, undefined);
+        if (rowIdList === undefined) {return;}
+        const rowId     = rowIdList[0];
+        const displayFormat = Object.assign({rowId: rowId}, signal) as unknown as SetDisplayFormatMessage;
+        this.setDisplayFormat(displayFormat, true);
+        this.restoreSlices(rowId, signal); // cmux: slices
+      } else if (signal.dataType === 'custom-variable') {
+        //console.log('addCustomVariable', signal);
+        const bitRange = signal.source[0];
+        const msb      = bitRange.msb;
+        const lsb      = bitRange.lsb;
+        const name     = bitRange.name + bitRangeString(msb, lsb, false);
+        const rowId    = this.addCustomVariable(name, undefined, parentGroupId, undefined, undefined, msb, lsb, bitRange);
+        if (rowId === undefined) {return;}
+        const displayFormat = Object.assign({rowId: rowId}, signal) as unknown as SetDisplayFormatMessage;
+        this.setDisplayFormat(displayFormat, true);
+        this.restoreSlices(rowId, signal); // cmux: slices
+      }
+    });
+  }
+
+  applyState(session: ApplyStateSettings, stateChangeType: number) {
+    //this.flushRowCache(true);
+    //console.log('applyState()', session);
+
+    this.events.enterBatchMode();
+    try {
+      if (viewerState.displayedSignals.length > 0) {
+        this.events.removeVariable(viewerState.visibleSignalsFlat, true);
+      }
+      this.addSignalList(session.displayedSignals, 0);
+      dataManager.garbageCollectValueFormats();
+    } catch (error) {console.error(error);}
+
+    if (session.markerTime !== undefined) {
+      this.events.markerSet(session.markerTime, 0, false);
+    }
+    if (session.altMarkerTime !== undefined) {
+      this.events.markerSet(session.altMarkerTime, 1, false);
+    }
+    if (session.displayTimeUnit !== undefined) {
+      viewport.updateUnits(session.displayTimeUnit, false);
+    }
+    if (session.selectedSignal) {
+      const rowIdList = this.getRowIdsFromNetlistId(session.selectedSignal);
+      let lastSelectedSignal: RowId | null = rowIdList[0];
+      if (rowIdList.length === 0) {lastSelectedSignal = null;}
+      this.events.signalSelect(rowIdList, lastSelectedSignal);
+    }
+    if (session.defaultPixelTime !== undefined) {
+      viewport.updateRulerNumberBasis(session.defaultPixelTime, false);
+    }
+
+    if (session.zoomRatio !== undefined && session.scrollLeft !== undefined) {
+      if (!viewport.updatePending) {
+        const endTime = session.scrollLeft + (viewport.viewerWidth / session.zoomRatio);
+        viewport.setViewportRange(session.scrollLeft, endTime);
+      }
+    }
+
+    this.events.exitBatchMode();
+    //console.log('applyState', stateChangeType);
+    vscodeWrapper.sendWebviewContext(stateChangeType);
+  }
+
+  renameSignalGroup(rowId: RowId | undefined, name: string | undefined) {
+
+    if (rowId === undefined) {
+      if (viewerState.selectedSignal.length === 1 && viewerState.selectedSignal[0] >= 0) {
+        rowId = viewerState.selectedSignal[0];
+      } else {
+        return;
+      }
+    }
+    const signalItem = this.rowItems[rowId];
+
+    const trimmedName = name?.trim() || "";
+    if (trimmedName !== "") {
+      signalItem.setLabelText(trimmedName);
+      labelsPanel.renderLabelsPanels();
+    } else {
+      labelsPanel.showRenameInput(rowId);
+    }
+  }
+
+  editSignalGroup(message: EditSignalGroupMessage) {
+
+    const groupPath = message.groupPath;
+    const groupId = message.groupId;
+    const name = message.name;
+    const isExpanded = message.isExpanded;
+
+    const groupItem = this.getGroupByIdOrName(groupPath, groupId);
+    if (groupItem === null) {return;}
+
+    if (name !== undefined) {
+      groupItem.setLabelText(name);
+      labelsPanel.renderLabelsPanels();
+    }
+
+    if (isExpanded !== undefined) {
+      if (isExpanded) {
+        groupItem.expand();
+      } else {
+        groupItem.collapse();
+      }
+    }
+  }
+
+  removeVariable(netlistId: NetlistId | undefined, rowId: RowId | undefined, removeAllSelected: boolean | undefined) {
+
+    let removeList: RowId[] = [];
+    if (rowId !== undefined) {
+      removeList = [rowId];
+      if (viewerState.selectedSignal.includes(rowId) && removeAllSelected) {
+        // We don't remove groups with child signals. However, we have to check
+        // if a group with children has all of its children selected, in which
+        // case we can remove the group as well.
+        removeList = viewerState.selectedSignal.filter((id) => {
+          const signalItem = this.rowItems[id];
+          if ((signalItem instanceof SignalGroup) && signalItem.children.length === 0) {
+            return true;
+          } else if (signalItem instanceof SignalGroup) {
+            // Check if all children of the group are selected
+            const childRowIdList = signalItem.getFlattenedRowIdList(false, -1);
+            return childRowIdList.reduce((acc, childRowId) => {
+              return acc && viewerState.selectedSignal.includes(childRowId);
+            }, true);
+          }
+          return true;
+        });
+      }
+    } else if (netlistId !== undefined) {
+      removeList = this.getRowIdsFromNetlistId(netlistId);
+    } else {
+      return;
+    }
+
+    const index = viewerState.visibleSignalsFlat.indexOf(viewerState.selectedSignal[0]);
+
+    this.events.removeVariable(removeList, true);
+
+    if (viewerState.selectedSignal.length === 1 && removeList.includes(viewerState.selectedSignal[0])) {
+      const newIndex = Math.max(0, Math.min(viewerState.visibleSignalsFlat.length - 1, index));
+      const newRowId = viewerState.visibleSignalsFlat[newIndex];
+      this.events.signalSelect([newRowId], newRowId);
+    } else {
+      const newSelected = viewerState.selectedSignal.filter((id) => removeList.includes(id) === false);
+      this.events.signalSelect(newSelected, viewerState.lastSelectedSignal);
+    }
+    //console.log('removeVariable');
+    vscodeWrapper.sendWebviewContext(StateChangeType.User);
+  }
+
+  removeSignalGroup(groupId: number, recursive: boolean) {
+    if (groupId === 0) {return;}
+    const rowId = this.groupIdTable[groupId];
+    if (rowId === undefined) {return;}
+    const index = viewerState.visibleSignalsFlat.indexOf(rowId);
+
+    const removeAllSelected = true;
+    let rowIdList: RowId[] = [rowId];
+    if (viewerState.selectedSignal.includes(rowId) && removeAllSelected) {
+      rowIdList = viewerState.selectedSignal;
+    }
+
+    const newSelected = viewerState.selectedSignal;
+    const removeList: RowId[] = [];
+    rowIdList.forEach((rId) => {
+      const groupItem = this.rowItems[rId];
+      if (!(groupItem instanceof SignalGroup)) {return;}
+      const childRowIdList = groupItem.getFlattenedRowIdList(false, -1);
+      let newSelected = viewerState.selectedSignal.map(id => id);
+      childRowIdList.forEach((childRowId) => {
+        if (newSelected.includes(childRowId)) {
+          newSelected = newSelected.filter(id => id !== childRowId);
+        }
+      });
+      removeList.push(rId);
+    });
+    this.events.removeVariable(removeList, recursive);
+
+    if (newSelected.length === 1) {
+      const newIndex = Math.max(0, Math.min(viewerState.visibleSignalsFlat.length - 1, index));
+      const newRowId = viewerState.visibleSignalsFlat[newIndex];
+      this.events.signalSelect([newRowId], newRowId);
+    } else {
+      this.events.signalSelect(newSelected, viewerState.lastSelectedSignal);
+    }
+    //console.log('removeSignalGroup');
+    vscodeWrapper.sendWebviewContext(StateChangeType.User);
+  }
+
+  handleRemoveVariable(rowIdList: RowId[], recursive: boolean) {
+
+    const disposedRowIdList: RowId[] = [];
+    rowIdList.forEach(rowId => {
+      const signalItem = this.rowItems[rowId];
+      // cmux: skip a row already queued (a group and its child both in the list, as applyState
+      // passes visibleSignalsFlat with recursive=true): disposing it twice throws.
+      if (!signalItem || disposedRowIdList.includes(rowId)) {return;}
+      let children: number[] = [];
+      disposedRowIdList.push(rowId);
+      // cmux: a row's slices (and their groups) go with it, removed or ungrouped.
+      this.sliceRows(signalItem).forEach((id) => {
+        if (!disposedRowIdList.includes(id)) {disposedRowIdList.push(id);}
+      });
+      const parentGroupId = getParentGroupId(rowId);
+      const indexInGroup = getIndexInGroup(rowId, parentGroupId);
+
+      if (recursive) {
+        signalItem.getFlattenedRowIdList(false, -1).forEach((id) => {
+          if (!disposedRowIdList.includes(id)) {disposedRowIdList.push(id);}
+        });
+      } else if (signalItem instanceof SignalGroup) {
+        signalItem.collapseState = CollapseState.Expanded;
+        signalItem.showHideViewportRows();
+        children = signalItem.children;
+      }
+      if (parentGroupId === 0) {
+        viewerState.displayedSignals.splice(indexInGroup, 1, ...children);
+      } else if (parentGroupId && parentGroupId > 0) {
+        const parentGroupItem = this.rowItems[this.groupIdTable[parentGroupId]];
+        if (parentGroupItem instanceof SignalGroup) {
+          parentGroupItem.children.splice(indexInGroup, 1, ...children);
+        }
+        // cmux: a removed slice: its owner's chevron and menu follow
+        if (parentGroupItem instanceof SliceGroup) {this.rowItems[parentGroupItem.owner]?.setSignalContextAttribute();}
+      }
+    });
+
+    disposedRowIdList.forEach((id: RowId) => {
+      const rowItem = this.rowItems[id];
+      if (rowItem instanceof NetlistVariable || rowItem instanceof CustomVariable) {
+        this.unsetValueFormat(rowItem.getWaveformData(), rowItem.valueFormat);
+      }
+      this.rowItems[id].dispose();
+      delete this.rowItems[id];
+    });
+
+    this.updateDisplayedSignalsFlat();
+    if (viewerState.displayedSignalsFlat.length === 0) {
+      this.flushRowCache(false);
+    }
+  }
+
+  public setValueFormat(data: WaveformData | undefined, valueFormat: ValueFormat, force: boolean) {
+    if (data === undefined) {return;}
+    if (data.signalWidth <= 1) {return;}
+
+    if (data.formattedValues[valueFormat.id] === undefined) {
+      data.formattedValues[valueFormat.id] = {
+        formatCached: false,
+        values: [] as string[],
+        users: 0,
+      };
+      this.updateValueFormatCache(data, valueFormat, force);
+    }
+    //console.log("formatCached:", data.formattedValues[valueFormat.id].formatCached, "users:", data.formattedValues[valueFormat.id].users);
+
+    data.formattedValues[valueFormat.id].users++;
+  }
+
+  unsetValueFormat(data: WaveformData | undefined, valueFormat: ValueFormat) {
+
+    if (data === undefined) {return;}
+    const formatData = data.formattedValues[valueFormat.id];
+    if (formatData === undefined) {return;}
+
+    formatData.users--;
+    if (formatData.users <= 0 && !this.events.isBatchMode) {
+      delete data.formattedValues[valueFormat.id];
+    }
+  }
+
+  public async updateValueFormatCache(data: WaveformData, valueFormat: ValueFormat, force: boolean) {
+    if (data === undefined) {return;}
+
+    const formatData = data.formattedValues[valueFormat.id];
+
+    if (force) {
+      formatData.formatCached = false;
+      formatData.values       = [];
+    }
+
+    return new Promise<void>((resolve) => {
+      const valueChangeData = data.valueChangeData;
+      if (valueChangeData === undefined) {resolve(); return;}
+      if (formatData.formatCached)       {resolve(); return;}
+      //if (this.renderType.id !== "multiBit") {resolve(); return;}
+
+      // vscode-port: a long signal is formatted in slices of about 8 ms, yielding to the page between them, so a
+      // whole-signal load or a format change never freezes the viewer (25,000 x 512-bit values took 17 s in one task).
+      // Until the last slice the renderer formats what it draws itself (formatCached false); a newer request for this
+      // format (force, or the format removed) stops the old one.
+      const fmt = (value: string) => valueFormat.formatString(value, data.signalWidth, !valueFormat.is9State(value));
+      const n = valueChangeData.length;
+      if (n <= FORMAT_SLICE_MIN) {
+        formatData.values = valueChangeData.map(([, value]) => fmt(value));
+        formatData.formatCached = true;
+        resolve();
+        return;
+      }
+      const job = {};
+      (formatData as any).job = job;
+      const values: string[] = new Array(n);
+      let i = 0;
+      const step = () => {
+        if (data.formattedValues[valueFormat.id] !== formatData || (formatData as any).job !== job) {resolve(); return;}
+        const end = performance.now() + FORMAT_SLICE_MS;
+        while (i < n) {
+          const stop = Math.min(n, i + 256);
+          for (; i < stop; i++) {values[i] = fmt(valueChangeData[i][1]);}
+          if (performance.now() >= end) {break;}
+        }
+        if (i < n) {setTimeout(step, (globalThis as any).vvE2EFormatSlicePauseMs || 0); return;} // e2e can slow the fill
+        formatData.values = values;
+        formatData.formatCached = true;
+        resolve();
+      };
+      step();
+    });
+  }
+
+  groupNameExists(name: string, parentGroupId: number): boolean {
+    const groupId = this.findGroupIdByName(name, parentGroupId);
+    return groupId !== -1;
+  }
+
+
+  findGroupIdByName(name: string, parentGroupId: number): number {
+    let result = -1;
+    const children = this.getChildrenByGroupId(parentGroupId);
+    children.forEach((rowId) => {
+      const rowItem = this.rowItems[rowId];
+      if (rowItem instanceof SignalGroup && rowItem.label === name) {result = rowItem.groupId;}
+    });
+    return result;
+  }
+
+  findGroupIdByNamePath(namePath: string[]): number {
+    let breakLoop = false;
+    let parentGroupId = 0;
+
+    namePath.forEach((name) => {
+      if (breakLoop) {return;}
+      parentGroupId = this.findGroupIdByName(name, parentGroupId);
+      if (parentGroupId === -1) {
+        breakLoop = true;
+      }
+    });
+    return parentGroupId;
+  }
+
+  handleColorChange() {
+    this.rowItems.forEach((data) => {
+      if (data instanceof NetlistVariable || data instanceof CustomVariable) {
+        data.setColorFromColorIndex();
+      }
+    });
+  }
+
+  removeChildrenFromSignalList(rowIdList: RowId[]) {
+    let groupChildren: number[] = [];
+    rowIdList.forEach((rowId) => {
+      const rowItem = this.rowItems[rowId];
+      if (rowItem) { // cmux: a row with slices has children too; was rowItem instanceof SignalGroup
+        const children = rowItem.getFlattenedRowIdList(false, -1);
+        children.shift(); // Remove the group itself from the list
+        groupChildren = groupChildren.concat(children);
+      }
+    });
+    const filteredRowIdList = rowIdList.filter((rowId) => {
+      return !groupChildren.includes(rowId);
+    });
+    return filteredRowIdList;
+  }
+
+  deselectAllSignals() {
+    this.events.signalSelect([], null);
+    vscodeWrapper.sendWebviewContext(StateChangeType.User);
+  }
+
+  handleReorderSignals(rowIdList: number[], newGroupId: number, newIndex: number) {
+
+    let dropIndex = newIndex;
+    const groupRowId = this.groupIdTable[newGroupId];
+    const filteredRowIdList = this.removeChildrenFromSignalList(rowIdList);
+    const newGroupChildren = this.getChildrenByGroupId(newGroupId);
+
+    // Prevent moving a group into itself or one of its children
+    let abort = false;
+    if (groupRowId === undefined && newGroupId > 0) {return;}
+    filteredRowIdList.forEach((rowId) => {
+      if (rowId === groupRowId) {abort = true;}
+      const item = this.rowItems[rowId];
+      const childItems = item.getFlattenedRowIdList(false, -1);
+      if (childItems.includes(groupRowId)) {abort = true;}
+    });
+    if (abort) {return;}
+
+    filteredRowIdList.forEach((rowId, i) => {
+
+      const oldGroupId = getParentGroupId(rowId) || 0;
+      const oldGroupChildren = this.getChildrenByGroupId(oldGroupId);
+      const oldIndex = oldGroupChildren.indexOf(rowId);
+      oldGroupChildren.splice(oldIndex, 1);
+
+      if (oldGroupId === newGroupId && newIndex > oldIndex) {
+        dropIndex -= 1;
+      }
+    });
+    
+    dropIndex = Math.min(Math.max(dropIndex, 0), newGroupChildren.length);
+    filteredRowIdList.forEach((rowId, i) => {
+      newGroupChildren.splice(dropIndex + i, 0, rowId);
+    });
+
+    this.updateDisplayedSignalsFlat();
+    //console.log(filteredRowIdList);
+  }
+
+  setDisplayFormat(message: SetDisplayFormatMessage, ignoreSelection: boolean) {
+
+    // vscode-port: a format change from the extension (row menu, keybinding, API) applies while the search bar has
+    // focus; upstream dropped it silently. The search is then parsed again with the row's new format (below).
+    if (labelsPanel.renameActive) {return;}
+
+    const netlistId = message.netlistId;
+    let rowId = message.rowId;
+    if (netlistId === undefined && rowId === undefined) {
+      if (viewerState.selectedSignal.length === 0) {return;}
+      rowId = viewerState.selectedSignal[0];
+    } else if (rowId === undefined) {
+      const matchingRows = this.getRowIdsFromNetlistId(netlistId!);
+      if (matchingRows.length === 0) {return;}
+      const index = message.index || 0;
+      rowId = matchingRows[index];
+    }
+    if (this.rowItems[rowId] === undefined) {return;}
+    const netlistData = this.rowItems[rowId];
+    if (!(netlistData instanceof NetlistVariable) && !(netlistData instanceof CustomVariable)) {return;}
+
+    let updateAllSelected = false;
+    let updateViewport = false;
+    let updateSelected = false;
+    let rowIdList = [rowId];
+    let redrawList = [rowId];
+    if (viewerState.selectedSignal.includes(rowId) && !ignoreSelection) {
+      rowIdList = viewerState.selectedSignal;
+      updateSelected = true;
+    }
+
+    rowIdList.forEach((rId) => {
+      const data = this.rowItems[rId];
+
+      // Row height
+      if (message.rowHeight !== undefined) {
+        data.rowHeight = message.rowHeight;
+        if (!this.events.isBatchMode) {
+          this.updateBounds();
+          viewport.updateElementHeight();
+          updateViewport = true;
+          updateAllSelected = true;
+        }
+      }
+
+      if (!(data instanceof NetlistVariable) && !(data instanceof CustomVariable)) {return;}
+
+      // Color - this is applied to all selected signals if the selected signal is being updated
+      if (message.colorIndex !== undefined) {
+        data.colorIndex = message.colorIndex;
+        data.setColorFromColorIndex();
+        updateAllSelected = true;
+      }
+
+      // Rendering type
+      if (message.renderType !== undefined) {
+        this.setRenderType(data, message.renderType);
+        updateAllSelected = true;
+      }
+
+      // Vertical scale
+      const isAnalog = isAnalogSignal(data.renderType);
+      if (message.verticalScale !== undefined && isAnalog) {
+        data.verticalScale = message.verticalScale;
+      }
+
+      // Name Type
+      if (message.nameType !== undefined) {
+        if (message.nameType === NameType.fullPath || 
+            message.nameType === NameType.signalName || 
+            message.nameType === NameType.custom) {
+          data.nameType = message.nameType;
+          if (message.nameType === NameType.custom && message.customName !== undefined) {
+            data.customName = message.customName;
+          }
+          updateAllSelected = true;
+        }
+      }
+
+      // Number format
+      if (message.numberFormat !== undefined) {
+        const valueFormat = getNumberFormatById(data, message.numberFormat);
+        if (valueFormat.checkWidth(data.signalWidth) || data.missingSignal) {
+          const forceUpdateValueFormat = !this.events.isBatchMode;
+          this.unsetValueFormat(data.getWaveformData(), data.valueFormat);
+          data.valueFormat = valueFormat;
+          this.setValueFormat(data.getWaveformData(), valueFormat, forceUpdateValueFormat);
+          updateAllSelected = true;
+        }
+      }
+    });
+
+    if (netlistData instanceof NetlistVariable) {
+
+      // Value link command
+      if (message.valueLinkEnable !== undefined) {
+
+        netlistData.valueLinkEnable = message.valueLinkEnable;
+        netlistData.valueLinkIndex  = -1;
+      }
+    }
+
+    // Edge guides
+    if (message.annotateValue !== undefined) {
+      viewport.annotateWaveform(rowId, message.annotateValue);
+      viewport.updateBackgroundCanvas();
+      viewport.updateOverlayCanvas();
+    }
+
+    //console.log('setDisplayFormat');
+    vscodeWrapper.sendWebviewContext(StateChangeType.User);
+    netlistData.setSignalContextAttribute();
+    if (controlBar.searchInFocus) {controlBar.handleSearchBarEntry({key: 'none'});} // vscode-port: reparse the search
+
+    if (this.events.isBatchMode) {return;}
+
+    if (updateViewport) {
+      viewport.redrawViewport();
+    } else if (updateAllSelected && updateSelected) {redrawList = viewerState.selectedSignal;}
+    redrawList.forEach((rId) => {
+      this.events.redrawVariable(rId);
+    });
+  }
+
+  setRenderType(netlistData: NetlistVariable | CustomVariable, renderType: string) {
+    if (!(netlistData instanceof NetlistVariable) && !(netlistData instanceof CustomVariable)) {return;}
+    if (netlistData.signalWidth !== 1) {
+      switch (renderType) {
+        case "multiBit":      netlistData.renderType = new MultiBitWaveformRenderer(); break;
+        case "linear":        netlistData.renderType = new LinearWaveformRenderer("linear",        netlistData.encoding, netlistData.signalWidth, false, false); break;
+        case "stepped":       netlistData.renderType = new LinearWaveformRenderer("stepped",       netlistData.encoding, netlistData.signalWidth, false, true); break;
+        case "linearSigned":  netlistData.renderType = new LinearWaveformRenderer("linearSigned",  netlistData.encoding, netlistData.signalWidth, true, false); break;
+        case "steppedSigned": netlistData.renderType = new LinearWaveformRenderer("steppedSigned", netlistData.encoding, netlistData.signalWidth, true, true); break;
+        default:              netlistData.renderType = new MultiBitWaveformRenderer(); break;
+      }
+    } else if (netlistData.signalWidth === 1 && renderType === "binary") {
+      netlistData.renderType = new BinaryWaveformRenderer();
+    }
+
+    if (netlistData.encoding !== "Real") {
+      if (renderType === 'steppedSigned' || renderType === 'linearSigned') {
+        netlistData.min = Math.max(-(2 ** (netlistData.signalWidth - 1)), -32768);
+        netlistData.max = Math.min(2 ** (netlistData.signalWidth - 1) - 1, 32767);
+      } else {
+        netlistData.min = 0;
+        netlistData.max = Math.min(2 ** netlistData.signalWidth - 1, 65535);
+      }
+    }
+
+    if (netlistData.renderType.id === "multiBit") {
+      this.setValueFormat(netlistData.getWaveformData(), netlistData.valueFormat, false);
+    }
+    netlistData.setSignalContextAttribute();
+  }
+
+}

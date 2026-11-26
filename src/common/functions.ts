@@ -1,0 +1,80 @@
+export function createInstancePath(scopePath: string[], signalName: string): string {
+  if (scopePath.length === 0) {
+    return signalName;
+  } else {
+    return scopePath.join(".") + "." + signalName;
+  }
+}
+
+export function bitRangeString(msb: number, lsb: number, hideBitZero: boolean): string {
+  if (hideBitZero && lsb === 0 && msb === 0) {return "";}
+  if (msb < 0 || lsb < 0) {return "";}
+  if (msb === lsb) {return "[" + msb + "]";}
+  return "[" + msb + ":" + lsb + "]";
+}
+
+export function toStringWithCommas(n: number): string {
+  return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
+export function parseParamValue(paramValue: string): string {
+  if (paramValue === "") {return "";}
+  if (paramValue.match(/[xXzZ]/)) {return paramValue;}
+  return BigInt('0b' + paramValue).toString(10);
+}
+
+export function scaleFromUnits(unit: string | undefined) {
+  switch (unit) {
+    case 'zs': return 1e-21;
+    case 'as': return 1e-18;
+    case 'fs': return 1e-15;
+    case 'ps': return 1e-12;
+    case 'ns': return 1e-9;
+    case 'us': return 1e-6;
+    case 'µs': return 1e-6;
+    case 'ms': return 1e-3;
+    case 's':  return 1;
+    case 'ks': return 1000;
+    default: return 1;
+  }
+}
+
+export function logScaleFromUnits(unit: string | undefined) {
+  switch (unit) {
+    case 'zs': return -21;
+    case 'as': return -18;
+    case 'fs': return -15;
+    case 'ps': return -12;
+    case 'ns': return -9;
+    case 'us': return -6;
+    case 'µs': return -6;
+    case 'ms': return -3;
+    case 's':  return 0;
+    case 'ks': return 3;
+    default: return 0;
+  }
+}
+
+export function timeHz(deltaT: number, unit: string | undefined, precision: number): string {
+  const timeHz = Math.abs(1 / (deltaT * scaleFromUnits(unit)));
+  let divisor  = 1;
+  let units    = 'Hz';
+  if (timeHz >= 1e15) {
+    divisor = 1e15;
+    units   = 'PHz';
+  } else if (timeHz >= 1e12) {
+    divisor = 1e12;
+    units   = 'THz';
+  } else if (timeHz >= 1e9) {
+    divisor = 1e9;
+    units   = 'GHz';
+  } else if (timeHz >= 1e6) {
+    divisor = 1e6;
+    units   = 'MHz';
+  } else if (timeHz >= 1e3) {
+    divisor = 1e3;
+    units   = 'KHz';
+  }
+  const roundedTimeHz = Math.round((timeHz / divisor) * Math.pow(10, precision)) / Math.pow(10, precision);
+  return roundedTimeHz + ' ' + units;
+}

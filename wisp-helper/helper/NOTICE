@@ -1,0 +1,7 @@
+The Wisp waveform helper (helper/) is MIT (an SPDX-License-Identifier: MIT line in each first-party source).
+
+Third-party code in this directory, each under its own licence:
+- lib/third_party/zstd/: the zstd decompressor (zstd 1.5.7). zstd is dual-licensed (BSD-3-Clause or GPL-2.0); this copy
+  is used under BSD-3-Clause, see lib/third_party/zstd/LICENSE.
+
+zstd is vendored above and compiled into the helper; the build links zlib (libz).

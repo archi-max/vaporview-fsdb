@@ -1,0 +1,32 @@
+#!/bin/bash
+# vscode-port: a MOCK of `verdi -nogui -dbdir <daidir> -ssf <fsdb> -play serve.tcl` for the Verdi
+# cross-check's tests (no Verdi, no licence). It speaks serve.tcl's protocol with canned answers from
+# $CMUX_VERDI_COMPILE_DIR/mock-answers.tsv: lines `signal<TAB>file<TAB>line` (file relative to the compile
+# directory), and optionally `units<TAB>fileUnit<TAB>windowUnit`. Unlisted signals: notFound. Not Verdi's code.
+A=$CMUX_VERDI_COMPILE_DIR/mock-answers.tsv
+echo "Verdi (mock) banner without JSON"
+[ -f "$A" ] || { echo "mock: no answers file"; exit 3; }
+FU=1ns; WU=1ns
+U=$(grep "^units	" "$A" | head -1)
+[ -n "$U" ] && { FU=$(echo "$U" | cut -f2); WU=$(echo "$U" | cut -f3); }
+printf '\n{"id":0,"ready":true,"engine":"verdi","fileUnit":"%s","windowUnit":"%s"}\n' "$FU" "$WU"
+while IFS= read -r line; do
+  [ -z "${line// }" ] && continue
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9-]*\).*/\1/p')
+  cmd=$(printf '%s' "$line" | sed -n 's/.*"cmd":"\([a-z]*\)".*/\1/p')
+  sig=$(printf '%s' "$line" | sed -n 's/.*"signal":"\([^"]*\)".*/\1/p')
+  case $cmd in
+    quit) break ;;
+    info) printf '\n{"id":%s,"ok":true,"fileUnit":"%s","windowUnit":"%s"}\n' "$id" "$FU" "$WU" ;;
+    active|driver)
+      hit=$(awk -F'\t' -v s="$sig" '$1 == s { print; exit }' "$A")
+      if [ -n "$hit" ]; then
+        f=$(echo "$hit" | cut -f2); l=$(echo "$hit" | cut -f3)
+        case $f in /*) ;; *) f=$CMUX_VERDI_COMPILE_DIR/$f ;; esac
+        printf '\n{"id":%s,"ok":true,"scope":"%s","file":"%s","line":%s}\n' "$id" "${sig%.*}" "$f" "$l"
+      else
+        printf '\n{"id":%s,"ok":false,"error":"notFound","message":"no driver for %s"}\n' "$id" "$sig"
+      fi ;;
+    *) printf '\n{"id":%s,"ok":false,"error":"badRequest","message":"unknown command %s"}\n' "$id" "$cmd" ;;
+  esac
+done

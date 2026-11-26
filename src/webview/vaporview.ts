@@ -1,0 +1,481 @@
+import { type RowId, StateChangeType, type DocumentId, CollapseState, DefaultWebviewContext, SavedRowItem, InitMessage, WebviewStateEvent } from '../common/types';
+import { EventHandler, DragController } from './event_handler';
+import { Viewport } from './viewport';
+import { LabelsPanels } from './labels';
+import { ControlBar } from './control_bar';
+import { RowHandler } from './row_handler';
+import { WaveformDataManager } from './data_manager';
+import { NetlistVariable, SignalGroup, SliceGroup, type RowItem } from './signal_item'; // cmux: SliceGroup
+import { Configuration, OS, ThemeColors, VscodeWrapper } from './vscode_wrapper';
+import { WindowCache } from './window_cache'; // cmux: windowed loading (protocol v2)
+
+export class ViewerState {
+  uri: string | null                 = null;
+  documentId: DocumentId             = "";
+  markerTime: number | null          = null;
+  altMarkerTime: number | null       = null;
+  selectedSignal: RowId[]            = [];
+  lastSelectedSignal: RowId | null   = null;
+  displayedSignals: number[]         = [];
+  displayedSignalsFlat: number[]     = [];
+  visibleSignalsFlat: RowId[]        = [];
+  zoomRatio: number                  = 1;
+  scrollLeft: number                 = 0;
+  autoReload: boolean                = false;
+}
+export const viewerState: ViewerState = new ViewerState();
+
+export function getParentGroupId(rowId: RowId | null): number | null {
+  if (rowId === null) {return null;}
+  if (viewerState.displayedSignals.includes(rowId)) {
+    return 0;
+  }
+  for (const id of viewerState.displayedSignals) {
+    const signalItem = rowHandler.rowItems[id];
+    const parentGroupId = signalItem.findParentGroupId(rowId);
+    if (parentGroupId !== null) {
+      return parentGroupId;
+    }
+  }
+  return null;
+}
+
+export function getParentGroupIdList(rowId: RowId | null | undefined): number[] {
+  let result: number[] = [];
+  if (rowId === null || rowId === undefined) {return result;}
+  const parentGroupId = getParentGroupId(rowId);
+  if (!parentGroupId) {return result;}
+  const parentGroupRowId = rowHandler.groupIdTable[parentGroupId];
+  if (parentGroupRowId === null) {return result;}
+  result = getParentGroupIdList(parentGroupRowId);
+  result.push(parentGroupId);
+
+  return result;
+}
+
+export function getIndexInGroup(rowId: RowId, groupId: number | null) {
+  let parentGroupId = groupId;
+  if (parentGroupId === null) {parentGroupId = getParentGroupId(rowId);}
+  if (parentGroupId === null) {return -1;}
+  if (parentGroupId === 0) {return viewerState.displayedSignals.indexOf(rowId);}
+  const groupRowId = rowHandler.groupIdTable[parentGroupId];
+  const groupItem = rowHandler.rowItems[groupRowId];
+  if (!(groupItem instanceof SignalGroup)) {
+    return -1;
+  }
+  return groupItem.children.indexOf(rowId);
+}
+
+export function revealSignal(rowId: RowId) {
+  if (rowId === null) {return;}
+
+  const parentList = getParentGroupIdList(rowId);
+
+  parentList.forEach((groupId) => {
+    const groupRowId = rowHandler.groupIdTable[groupId];
+    if (groupRowId === undefined) {return;}
+    const groupItem: RowItem = rowHandler.rowItems[groupRowId];
+    if (!(groupItem instanceof SignalGroup)) {return;}
+    if (groupItem.collapseState === CollapseState.Collapsed) {
+      groupItem.expand();
+    }
+  });
+
+  const labelBounds = viewport.getRowIdBounds(rowId);
+  if (labelBounds === null) {return;}
+  const scrollTop  = viewport.pseudoScrollTop;
+  let newScrollTop = scrollTop;
+
+  if (labelBounds[0] - scrollTop < 0) {
+    newScrollTop = Math.max(0, labelBounds[0]);
+  } else if (labelBounds[1] - scrollTop > viewport.viewerHeight) {
+    newScrollTop = Math.min(viewport.maxScrollTop, labelBounds[1] - (viewport.viewerHeight));
+  }
+
+  if (newScrollTop !== viewport.pseudoScrollTop) {
+    viewport.handleScrollEvent(viewport.pseudoScrollLeft, newScrollTop);
+  }
+}
+
+export function handleClickSelection(event: MouseEvent, rowId: RowId) {
+  let newSelection: RowId[] = [rowId];
+  if (event.shiftKey && viewerState.lastSelectedSignal !== null) {
+    const lastSelectedIndex = viewerState.visibleSignalsFlat.indexOf(viewerState.lastSelectedSignal);
+    const clickedIndex      = viewerState.visibleSignalsFlat.indexOf(rowId);
+    const startIndex        = Math.min(lastSelectedIndex, clickedIndex);
+    const endIndex          = Math.max(lastSelectedIndex, clickedIndex);
+    const addedSignals      = viewerState.visibleSignalsFlat.slice(startIndex, endIndex + 1).filter(id => !viewerState.selectedSignal.includes(id));
+    newSelection            = viewerState.selectedSignal.concat(addedSignals);
+  } else if (event.ctrlKey || event.metaKey) {
+    if (viewerState.selectedSignal.includes(rowId)) {
+      newSelection = viewerState.selectedSignal.filter(id => id !== rowId);
+    } else {
+      newSelection = viewerState.selectedSignal.concat([rowId]);
+    }
+  } else {
+    newSelection = [rowId];
+  }
+  events.signalSelect(newSelection, rowId);
+  //console.log('handleClickSelection');
+  vscodeWrapper.sendWebviewContext(StateChangeType.User);
+}
+
+// ----------------------------------------------------------------------------
+// Event handler helper functions
+// ----------------------------------------------------------------------------
+
+export function createWebviewContext(): WebviewStateEvent {
+  let selectedNetlistId: number | null = null;
+  if (viewerState.selectedSignal.length === 1) {
+    const data = rowHandler.rowItems[viewerState.selectedSignal[0]];
+    if (data instanceof NetlistVariable) {
+      selectedNetlistId = data.netlistId ?? null;
+    }
+  }
+
+  const signalList: SavedRowItem[] = [];
+  viewerState.displayedSignals.forEach((rowId) => {
+    const data = rowHandler.rowItems[rowId];
+    if (!data) {return;}
+    const saveData = data.getSaveData();
+    signalList.push(saveData);
+  });
+
+  return {
+    markerTime: viewerState.markerTime ?? undefined,
+    altMarkerTime: viewerState.altMarkerTime ?? undefined,
+    displayTimeUnit: viewport.displayTimeUnit,
+    selectedSignal: selectedNetlistId,
+    selectedSignalCount: viewerState.selectedSignal.length,
+    transitionCount: dataManager.getTransitionCount(),
+    zoomRatio: viewport.zoomRatio,
+    defaultPixelTime: viewport.defaultPixelTime * 100,
+    scrollLeft: Math.round(viewport.timeScrollLeft),
+    autoReload: viewerState.autoReload,
+    displayedSignals: signalList,
+  };
+}
+
+class VaporviewWebview {
+
+  lastIsTouchpad: boolean = false;
+  touchpadCheckTimer: number = 0;
+
+  constructor(private events: EventHandler) {
+
+    const labelsScroll = document.getElementById('waveform-labels');
+    const valuesScroll = document.getElementById('value-display');
+    const scrollArea   = document.getElementById('scrollArea');
+
+    if (labelsScroll === null || valuesScroll === null || scrollArea === null) {
+      throw new Error("Could not find all required elements");
+    }
+
+    window.addEventListener('keydown',     (e) => {this.keyDownHandler(e);});
+    window.addEventListener('keyup',       (e) => {this.keyUpHandler(e);});
+    window.addEventListener('resize',      ()  => {events.resize();}, false);
+    scrollArea.addEventListener('wheel',   (e) => {this.scrollHandler(e);});
+    labelsScroll.addEventListener('wheel', (e) => {viewport.handleScrollEvent(viewport.pseudoScrollLeft, viewport.pseudoScrollTop + e.deltaY);});
+    valuesScroll.addEventListener('wheel', (e) => {viewport.handleScrollEvent(viewport.pseudoScrollLeft, viewport.pseudoScrollTop + e.deltaY);});
+    document.addEventListener('dragover',  (e) => {labelsPanel.dragMoveExternal(e);});
+    document.addEventListener('drop',      (e) => {vscodeWrapper.handleDrop(e);});
+  }
+
+  // Function to test whether or not the user is using a touchpad
+  // Sometimes it returns false negatives when flicking the touchpad,
+  // hence the timer to prevent multiple checks in a short period of time
+  isTouchpad(e: WheelEvent) {
+
+    if (performance.now() < this.touchpadCheckTimer) {
+      return this.lastIsTouchpad;
+    }
+
+    const wheelDeltaY = (e as WheelEvent & { wheelDeltaY?: number }).wheelDeltaY;
+    if (wheelDeltaY) {
+      if (wheelDeltaY === (e.deltaY * -3)) {
+        this.lastIsTouchpad = true;
+        return true;
+      }
+    //} else if (e.wheelDeltaX && !e.shiftKey) {
+    //  if (e.wheelDeltaX === (e.deltaX * -3)) {
+    //    this.lastIsTouchpad = true;
+    //    return true;
+    //  }
+    } else if (e.deltaMode === 0) {
+      this.lastIsTouchpad = true;
+      return true;
+    }
+    this.lastIsTouchpad = false;
+    return false;
+  }
+
+  scrollHandler(e: WheelEvent) {
+    e.preventDefault();
+    //console.log(event);
+    //if (!isTouchpad) {e.preventDefault();}
+
+    const deltaY = e.deltaY;
+    const deltaX = e.deltaX;
+    const touchpadPinchDivider = 18 / config.touchpadPinchSensitivity;
+    const mouseMode = !config.autoTouchpadScrolling && !config.touchpadScrolling;
+
+    if (e.shiftKey) {
+      e.stopPropagation();
+      const delta = deltaY || deltaX;
+      const newScrollTop = viewport.pseudoScrollTop + delta;
+      viewport.handleScrollEvent(viewport.pseudoScrollLeft, newScrollTop);
+
+    } else if (e.ctrlKey || (e.metaKey && config.os === OS.Mac)) {
+      if      (viewport.updatePending) {return;}
+      // Touchpad mode detection returns false positives with pinches, so we
+      // just clamp the deltaY value to prevent zooming in/out too fast
+      const bounds      = viewport.scrollAreaBounds;
+      const pixelLeft   = Math.round(e.pageX - bounds.left);
+      const time        = Math.round((pixelLeft + viewport.pseudoScrollLeft) * viewport.pixelTime);
+      const zoomOffset  = Math.min(touchpadPinchDivider, Math.max(-touchpadPinchDivider, deltaY));
+
+      //if (deltaY !== zoomOffset) {console.log('deltaY: ' + deltaY + '; zoomOffset: ' + zoomOffset);}
+      // scroll up zooms in (- deltaY), scroll down zooms out (+ deltaY)
+      if      (mouseMode && (deltaY > 0)) {viewport.handleZoom( 1, time, pixelLeft);}
+      else if (mouseMode && (deltaY < 0)) {viewport.handleZoom(-1, time, pixelLeft);}
+
+      // Handle zooming with touchpad since we apply scroll attenuation
+      else {
+        viewport.handleZoom(zoomOffset / touchpadPinchDivider, time, pixelLeft);
+      }
+
+    } else {
+      //if (isTouchpad) {
+      //  viewport.handleScrollEvent(viewport.pseudoScrollLeft + e.deltaX);
+      //  this.scrollArea.scrollTop       += e.deltaY;
+      //  this.labelsScroll.scrollTop      = this.scrollArea.scrollTop;
+      //  this.valuesScroll.scrollTop  = this.scrollArea.scrollTop;
+      //} else {
+      //  viewport.handleScrollEvent(viewport.pseudoScrollLeft + deltaY);
+      //}
+
+      const isTouchpad = config.autoTouchpadScrolling ? this.isTouchpad(e) : config.touchpadScrolling;
+      this.touchpadCheckTimer = performance.now() + 100;
+
+      if (e.deltaX !== 0 || isTouchpad) {
+        viewport.handleScrollEvent(viewport.pseudoScrollLeft + deltaX, viewport.pseudoScrollTop + e.deltaY);
+      } else {
+        viewport.handleScrollEvent(viewport.pseudoScrollLeft + deltaY, viewport.pseudoScrollTop);
+      }
+    }
+  }
+
+  keyDownHandler(e: KeyboardEvent) {
+
+    let updateState = false;
+
+    if (controlBar.searchInFocus || labelsPanel.renameActive) {return;} 
+    else {e.preventDefault();}
+
+    // debug handler to print the data cache
+    if (e.key === 'd' && e.ctrlKey) {
+      console.log(viewport.updatePending);
+      console.log(viewerState);
+      console.log(rowHandler.rowItems);
+    }
+
+    // left and right arrow keys move the marker
+    // ctrl + left and right arrow keys move the marker to the next transition
+
+    let selectedSignalIndex: number | null = null;
+    if (viewerState.lastSelectedSignal !== null) {
+      selectedSignalIndex = viewerState.visibleSignalsFlat.indexOf(viewerState.lastSelectedSignal);
+    }
+
+    if ((e.key === 'ArrowRight') && (viewerState.markerTime !== null)) {
+   
+      if      (e.metaKey) {this.events.markerSet(viewport.timeStop, 0, false); updateState = true;}
+      else if (e.ctrlKey) {/* Do nothing */}
+      else if (e.altKey)  {controlBar.goToNextTransition(1, 1, []);}
+      else                {controlBar.goToNextTransition(0, 1, []);}
+    } else if ((e.key === 'ArrowLeft') && (viewerState.markerTime !== null)) {
+      if      (e.metaKey) {this.events.markerSet(0, 0, false); updateState = true;}
+      else if (e.ctrlKey) {/* Do nothing */}
+      else if (e.altKey)  {controlBar.goToNextTransition(1, -1, []);}
+      else                {controlBar.goToNextTransition(0, -1, []);}
+
+    // up and down arrow keys move the selected signal
+    // alt + up and down arrow keys reorder the selected signal up and down
+    } else if ((e.key === 'ArrowUp') && (selectedSignalIndex !== null)) {
+      const newIndex = Math.max(selectedSignalIndex - 1, 0);
+      const newRowId = viewerState.visibleSignalsFlat[newIndex];
+      updateState    = true;
+      if    (e.shiftKey) {this.addToSelection(newRowId);}
+      else if (e.altKey) {this.handleReorderArrowKeys(-1);}
+      else               {this.events.signalSelect([newRowId], newRowId);}
+    } else if ((e.key === 'ArrowDown') && (selectedSignalIndex !== null)) {
+      const newIndex = Math.min(selectedSignalIndex + 1, viewerState.visibleSignalsFlat.length - 1);
+      const newRowId = viewerState.visibleSignalsFlat[newIndex];
+      updateState    = true;
+      if    (e.shiftKey) {this.addToSelection(newRowId);}
+      else if (e.altKey) {this.handleReorderArrowKeys(1);}
+      else               {this.events.signalSelect([newRowId], newRowId);}
+    }
+
+    // handle Home and End keys to move to the start and end of the waveform
+    else if (e.key === 'Home') {this.events.markerSet(0, 0, false); updateState = true;}
+    else if (e.key === 'End')  {this.events.markerSet(viewport.timeStop, 0, false); updateState = true;}
+
+    // "N" and Shift + "N" go to the next transition
+    else if (e.key === 'n') {controlBar.goToNextTransition(0, 1, []);}
+    else if (e.key === 'N') {controlBar.goToNextTransition(0, -1, []);}
+
+    else if (e.key === 'a' && (e.ctrlKey || e.metaKey) && !controlBar.searchInFocus && !labelsPanel.renameActive) {
+      e.preventDefault();
+      controlBar.defocusSearchBar();
+      this.events.signalSelect(viewerState.displayedSignalsFlat, null);
+      updateState = true;
+    }
+
+    else if (e.key === 'Escape') {
+      const cancelled = windowCache.cancelNav(); // cmux: Escape stops a long host edge/value search
+      if (dragController.isActive) {dragController.cancel(e);}
+      else if (!cancelled && !labelsPanel.renameActive) {rowHandler.deselectAllSignals();} // cmux: keep the selection after a cancel
+    }
+    else if (e.key === 'Delete' || e.key === 'Backspace') {
+      //viewerState.selectedSignal.forEach((rowId) => {
+      //  const rowItem = rowHandler.rowItems[rowId];
+      //  if (rowItem instanceof SignalGroup && rowItem.children.length > 0) {return;}
+      //  rowHandler.removeVariable(undefined, rowId, true);
+      //});
+      rowHandler.removeVariable(undefined, viewerState.selectedSignal[0], true);
+    }
+
+    else if (e.key === 'Control' || e.key === 'Meta') {viewport.setValueLinkCursor(true);}
+
+    if (updateState) {
+      //console.log('keyDownHandler');
+      vscodeWrapper.sendWebviewContext(StateChangeType.User);
+    }
+  }
+
+  keyUpHandler(e: KeyboardEvent) {
+    if (e.key === 'Control' || e.key === 'Meta') {viewport.setValueLinkCursor(false);}
+  }
+
+  addToSelection(rowId: RowId) {
+    const newSelection = viewerState.selectedSignal;
+    if (!viewerState.selectedSignal.includes(rowId)) {
+      newSelection.push(rowId);
+    }
+    this.events.signalSelect(newSelection, rowId);
+  }
+
+  handleReorderArrowKeys(direction: number) {
+
+    if (viewerState.selectedSignal.length !== 1) {return;}
+    const rowId = viewerState.selectedSignal[0];
+    if (rowId === null) {return;}
+    let parentGroupId = getParentGroupId(rowId);
+    let parentList: RowId[] = [];
+    if (parentGroupId === null) {return;}
+    if (parentGroupId === 0) {
+      parentList = viewerState.displayedSignals;
+    } else {
+      const parentRowId = rowHandler.groupIdTable[parentGroupId];
+      const parentItem = rowHandler.rowItems[parentRowId];
+      if (!(parentItem instanceof SignalGroup)) {return;}
+      parentList = parentItem.children;
+    }
+
+    const localIndex = getIndexInGroup(rowId, parentGroupId);
+    let newIndex = localIndex + direction;
+
+    // First check to see if we're moving it outside the parent group
+    if (newIndex < 0 || newIndex >= parentList.length) {
+      // cmux: slices stay under their row
+      if (parentGroupId > 0 && rowHandler.rowItems[rowHandler.groupIdTable[parentGroupId]] instanceof SliceGroup) {return;}
+      const parentGroupRowId = rowHandler.groupIdTable[parentGroupId];
+      const grandparentGroupId = getParentGroupId(parentGroupRowId);
+      if (grandparentGroupId === null) {return;}
+      const parentIndex = getIndexInGroup(rowHandler.groupIdTable[parentGroupId], grandparentGroupId);
+      newIndex = parentIndex;
+      if (direction > 0) {newIndex += direction;}
+      parentGroupId = grandparentGroupId;
+    } else {
+      // if the adjacent row is a group, and the group is expanded, we place it in the top or bottom of the group
+      const adjacentRowId = parentList[newIndex];
+      const adjacentGroupId = rowHandler.groupIdTable.indexOf(adjacentRowId);
+      const groupItem = rowHandler.rowItems[adjacentRowId];
+      if (groupItem instanceof SignalGroup && groupItem.collapseState === CollapseState.Expanded) {
+        parentGroupId = adjacentGroupId;
+        if (direction > 0) {newIndex = 0;}
+        else {
+          const adjacentGroup = rowHandler.rowItems[rowHandler.groupIdTable[adjacentGroupId]];
+          if (!(adjacentGroup instanceof SignalGroup)) {return;}
+          newIndex = adjacentGroup.children.length;
+        }
+      // not sure why, but we need to increment the index if moving down
+      } else if (direction > 0) {
+        newIndex += 1;
+      }
+    }
+
+    this.events.reorderSignals([rowId], parentGroupId, newIndex);
+  }
+}
+
+export function init(message: InitMessage) {
+  const context: DefaultWebviewContext = {
+    preventDefaultContextMenuItems: true,
+    webviewSelection: true,
+    documentId: message.documentId,
+    uri: message.uri as unknown as DefaultWebviewContext['uri'],
+  };
+  document.body.setAttribute("data-vscode-context", JSON.stringify(context));
+  //document.title         = message.metadata.filename;
+  viewerState.uri        = message.uri;
+  viewerState.documentId = message.documentId;
+  styles.getThemeColors();
+  styles.updateColorPalette(message.colorPalette, message.errorColorPalette, message.themeValid);
+  viewport.initViewport(message.metadata);
+  controlBar.setAutoReload(message.autoReload);
+  vscodeWrapper.restoreState();
+  vscodeWrapper.setInitComplete();
+  //this.updateRuler();
+  //this.updatePending = false;
+}
+
+export function unload() {
+  viewerState.selectedSignal       = [];
+  viewerState.markerTime           = null;
+  viewerState.altMarkerTime        = null;
+  viewerState.displayedSignals     = [];
+  viewerState.displayedSignalsFlat = [];
+  viewerState.visibleSignalsFlat   = [];
+  viewerState.zoomRatio            = 1;
+  dataManager.unload();
+  labelsPanel.renderLabelsPanels();
+  labelsPanel.renderValueDisplay();
+  // we don't need to do anything to the viewport, because the ready message will reinitialize it
+  vscodeWrapper.webviewReady();
+}
+
+export const events        = new EventHandler();
+export const dragController = new DragController();
+export const styles        = new ThemeColors(events);
+export const config        = new Configuration();
+export const vscodeWrapper = new VscodeWrapper(events);
+export const dataManager   = new WaveformDataManager(events);
+export const windowCache   = new WindowCache(); // cmux: windowed loading (protocol v2)
+export const rowHandler    = new RowHandler(events);
+export const controlBar    = new ControlBar(events);
+export const viewport      = new Viewport(events);
+export const labelsPanel   = new LabelsPanels(events);
+const vaporview            = new VaporviewWebview(events);
+
+vscodeWrapper.webviewReady();
+
+//function getNonce(): string {
+//  let text = '';
+//  const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+//  for (let i = 0; i < 32; i++) {
+//    text += possible.charAt(Math.floor(Math.random() * possible.length));
+//  }
+//  return text;
+//}

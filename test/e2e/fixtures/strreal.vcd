@@ -1,0 +1,22 @@
+$timescale 1ns $end
+$scope module top $end
+$var real 64 ! temp $end
+$var string 1 " state $end
+$var wire 4 # nib [3:0] $end
+$upscope $end
+$enddefinitions $end
+#0
+r1.5 !
+sIDLE "
+b0000 #
+#10
+r-2.25 !
+sRUN "
+b1010 #
+#20
+r3.125e10 !
+sDONE_STATE "
+b1x0z #
+#30
+r0 !
+sIDLE "

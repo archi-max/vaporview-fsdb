@@ -1,0 +1,5 @@
+; Verdi resource file with alias lines (synthetic test fixture); other commands are ignored.
+verdiWindowResize -win $_Verdi_1 "0" "0" "800" "600"
+aliasmapname cnt_rc
+nalias RC_ZERO 8'h00
+nalias RC_THREE 8'h03

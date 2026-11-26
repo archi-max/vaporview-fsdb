@@ -1,0 +1,7 @@
+# Value aliases for counter.vcd's top.cnt (Verdi .alias syntax). Synthetic test fixture.
+alias cnt_alias
+  ZERO  8'h00
+  ONE   8'h01
+  TWO   8'h02
+  THREE 8'h03
+endalias

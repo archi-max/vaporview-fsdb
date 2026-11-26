@@ -1,0 +1,7 @@
+{
+  // trace-design-scope.test.cjs: each folder sets its own relative designArgs; the workspace sets a
+  // designRoot that is wrong for them ("." is the extension's own working directory). A folder's arguments must
+  // resolve against its own folder, never the workspace's designRoot.
+  "folders": [{ "path": "trace-scope/a" }, { "path": "trace-scope/p" }],
+  "settings": { "vaporview.trace.designRoot": "." }
+}

@@ -1,0 +1,25 @@
+out
+dist/
+build/
+node_modules
+.vscode-test-web/
+*.vsix
+*.vcd
+.DS_Store
+*.fsdb
+target/
+src/extension_core/filehandler.ts
+*.tsbuildinfo
+.vscode-test/
+bin/
+dist-vsix/
+THIRD-PARTY-NOTICES.txt
+test/perf/.build/
+# test fixtures are synthetic and small; keep them tracked despite *.vcd above
+!test/e2e/fixtures/**/*.vcd
+BUILD-INFO.txt
+!test/trace/dumps/*.vcd
+
+# vscode-port: workspace settings an e2e test may write; the tests delete them
+test/e2e/fixtures/.vscode/
+test/e2e/out-fmt/
