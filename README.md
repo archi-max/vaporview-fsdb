@@ -52,10 +52,12 @@ opens without loading whole. The editor link also needs slang-server, and tracin
 
 ### Debug mode
 
-Break on a value, a condition or a source line: run **Debug This Waveform** (F5) and the dump runs to the first
-cycle where it holds (also on a signal change or text). Step a cycle at a time, forward or back, with watches,
-Evaluate and Locals. The editor highlights the stopped line and shows its values at the marker as quiet text after
-it (a → b where they changed); set `vaporview.debug.inlineValues` to `all` for every line, or `off`.
+Run **Debug This Waveform** (F5 in the viewer): the session stops at the marker's cycle. Set breakpoints on a
+value, a condition, a signal change, text or a source line, then Continue (F5) runs to the first cycle where one
+holds, and Reverse Continue (Ctrl+F6) runs back to the previous one. Step a cycle at a time, forward or back, or
+play, with watches, Evaluate and Locals. The editor highlights the stopped line and shows its values at the marker
+as quiet text after it (a → b where they changed); set `vaporview.debug.inlineValues` to `all` for every line, or
+`off`. The [Debug mode](VIEWER.md#debug-mode) section of the viewer guide covers each part.
 
 <img src="media/readme/debug.png" width="100%"
   alt="The waveform debugger stopped at a source-line breakpoint in CVA6's issue stage, with the stopped line
@@ -105,6 +107,11 @@ Everything from VaporView also works (VCD, FST, GHW, markers, value formats, sea
 |---|---|---|
 | F5 | waveform viewer | Debug This Waveform |
 | F10 / Ctrl+F10 (Cmd+F10 on macOS) | debugging a waveform | step one cycle forward / back |
+| F5 / Ctrl+F6 (Cmd+F6) | debugging a waveform | continue to the next / previous breakpoint hit |
+| Ctrl+Shift+F6 / Ctrl+F11 (Cmd+Shift+F6 / Cmd+F11) | debugging a waveform | go to the first / last cycle |
+| Ctrl+F7 (Cmd+F7) | debugging a waveform | play / pause |
+| Ctrl+F8 / Ctrl+Shift+F8 (Cmd+F8 / Cmd+Shift+F8) | debugging a waveform | play faster / slower |
+| F9 / Alt+F7 | SystemVerilog editor | line breakpoint in this instance / in any instance of the module |
 | Ctrl+T | waveform viewer | Trace Driver at Marker |
 | Ctrl+Alt+T | waveform viewer | Trace to Root |
 | Ctrl+Alt+T / Ctrl+Alt+Shift+T | SystemVerilog editor | Trace Driver / Trace to Root at the cursor |

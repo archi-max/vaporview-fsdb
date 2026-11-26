@@ -238,6 +238,66 @@ When no WaveDrom clock is set, an "event" is classified by a value transition of
 
 To set which signal will be the WaveDrom Clock, right click on the signal you wish to be the clock, and select **"Set WaveDrom Clock Rising"** or **"Set WaveDrom Clock Falling"**. When a clock is set, a WaveDrom event will be counted on the edge of the selected clock. If other displayed signals do not have a value transition on the edge of the selected clock, the first (if it exists) value transition that occurs between the current and next clock edge will be logged. If multiple value transitions for a given signal (that is not the clock) occur in one clock cycle, it will only copy the first value transition. Note that because of this limitation, the WaveDrom output will not contain all of the information.
 
+# Debug mode
+
+VaporView FSDB can step through a waveform like a program. Open a dump and run **Debug This Waveform** (F5 in the
+viewer, or the button in the editor title bar). The session stops at the marker's cycle (or the first cycle) and
+shows the stopped line in the SystemVerilog source when the design is set up (see Set up tracing in the README).
+**Stop Debugging the Waveform** ends it.
+
+## Moving through cycles
+
+- **Step:** F10 steps one cycle forward, Ctrl+F10 (Cmd+F10 on macOS) one cycle back.
+- **Continue:** F5 runs to the next cycle where a breakpoint holds; Ctrl+F6 (Cmd+F6) runs back to the previous one.
+- **First / last cycle:** Ctrl+Shift+F6 / Ctrl+F11 (Cmd+Shift+F6 / Cmd+F11).
+- **Play:** Ctrl+F7 (Cmd+F7), or Play in the debug toolbar, moves the marker a cycle at a time and stops at the next
+  breakpoint hit. Ctrl+F8 / Ctrl+Shift+F8 play faster / slower; the launch option `rate` sets cycles per second.
+- **Clock:** a cycle is a rising edge of the clock. The session picks one under the top scopes (clk, clock, clk_i, …);
+  right-click a 1-bit row and choose **Use Selected Signal as Clock** to use another; **Use Automatic Clock** (command
+  palette) goes back.
+
+## Breakpoints
+
+- **On a signal:** right-click a row and choose **Break When Changes**, **Break When Equals…** or **Break When Text
+  Matches…** (also in the command palette).
+- **By name:** in the Breakpoints view, add a function breakpoint: `top.sig` (any change), `top.sig == value`, or
+  `top.sig ~ /regex/ format`.
+- **On a source line:** F9 on a line of the design. It holds in the cycles where the signals that line assigns
+  change, in the instance the session is on. Alt+F7 sets it for any instance of the module; **Choose Instance for
+  Module…** (editor right-click) picks the instance. Source-line breakpoints need the design.
+- **Condition:** edit any breakpoint and give a SystemVerilog expression, such as `cnt == 8'hff && valid`; it
+  breaks only in cycles where the expression is true.
+- **On a Locals variable:** right-click it and choose **Break on Value Change**.
+
+A search that takes more than 2 s shows "Searching for … at *time* of *end*" in the status bar; Pause stops it.
+Continue right after adding a breakpoint waits until the breakpoint is resolved ("Resolving breakpoints…"), and
+stops with a message if it isn't resolved within 10 s.
+
+## Values
+
+- **Locals:** the signals of the instance the session is on (the stopped instance, or the one under the editor
+  cursor), with its sub-scopes to expand.
+- **Watches and Evaluate:** SystemVerilog expressions over the dump at the current cycle (4-state; sized and unsized
+  numbers, concatenation, replication, the ternary operator), in the Watch view, the Debug Console and hovers.
+  **Evaluate Expression…** (command palette) and **Evaluate at Cycle…** (editor right-click) ask for one directly.
+- **In the editor:** the stopped line's values appear as quiet text after it (a → b where they changed this cycle).
+  Margin bars mark the lines that drove a change; hover one to see what changed. Set
+  `vaporview.debug.inlineValues` to `all` for every visible line, or `off`.
+- A signal the dump has no value for shows "no value" with the reason, never x, in Locals, watches, conditions and
+  the editor.
+
+## Launch options
+
+A `launch.json` configuration of type `vaporview-waveform` (request `attach`) takes:
+
+| Option | Meaning |
+|---|---|
+| `waveform` | the dump to debug (default: the active viewer) |
+| `clock` | the clock's dump path, such as `top.clk` (default: chosen automatically) |
+| `instance` | the instance Locals shows at start, such as `top.u0` |
+| `lineBreakpointInstances` | `this` (default): line breakpoints hold in the session's instance; `any`: in any instance |
+| `rate` | cycles per second for play (default 10) |
+
 # Requirements
 
 This extension requires VScode 1.102.0 or later

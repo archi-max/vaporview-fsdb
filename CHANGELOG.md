@@ -11,8 +11,9 @@ release (based on VaporView 1.6.1-beta, commit 59107c6). Not affiliated with ups
 - **No value is not x:** undumped signals that cannot be computed show "no value" with the reason, everywhere
   (rows, inline values, debugger variables and conditions, tracing); port copies resolved through their connection
   are labelled "via …".
-- **Debugger editor marks:** a unique stopped line, margin bars on the lines that drove a change, value chips in
-  the waveform's radix with a → b changes.
+- **Debugger editor marks:** a unique stopped line, margin bars on the lines that drove a change, and the stopped
+  line's values as quiet text after it, in the waveform row's radix (`8'h1f`), with a → b changes and
+  "no value (reason)" where the dump has none.
 
 - **FSDB and WCZ** open in the waveform editor through the bundled native wisp-helper (Linux x64, macOS arm64
   and x86-64; glibc 2.17+ / macOS 13.3+). FSDB is read by wisp-helper's own decoder: no Synopsys/Verdi software or
@@ -25,7 +26,7 @@ release (based on VaporView 1.6.1-beta, commit 59107c6). Not affiliated with ups
 - **Editor link** between the waveform and the SystemVerilog source (needs slang-server, not bundled).
 - Optional Verdi cross-check for Trace Driver: runs your own Verdi, on request only, after a notice.
 - Exact value search (hex / decimal / binary / signed; x and z handled literally).
-- Own extension id (`wisp`), so it installs as a separate extension. It still uses the `vaporview.*`
+- Own extension id (`vaporview-fsdb`), so it installs as a separate extension. It still uses the `vaporview.*`
   command and setting names, so only one of the two can be enabled: with upstream VaporView enabled too, VaporView FSDB
   shows a warning with a button for each and stays inactive.
 - Platform VSIXes: linux-x64 and universal (macOS with wisp-helper and the design model prebuilt;
