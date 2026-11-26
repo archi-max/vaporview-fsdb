@@ -9,10 +9,11 @@
 # Limits on the shared box: nice 19, 4 GB address space is too small for electron, so a 12 GB cap; 15 min timeout
 # (E2E_TIMEOUT seconds; the fmt target uses 60 min per format).
 # REMOTE_DIR defaults to ~/vaporview-test/<this checkout's dir name>, so parallel worktrees don't collide.
-# slang-server 0.3.1 (hudson-trading/slang-server release v0.3.1 = 2ad996f, the Mac's version) is on PATH from
-# ~/vaporview-test/tools/slang-server-0.3.1, so the source-link tests run with our own slang-server client. With
+# slang-server 0.3.1 (hudson-trading/slang-server release v0.3.1 = 2ad996f) must be on the host's PATH (or in
+# E2E_SLANG_SERVER_DIR), so the source-link tests run with our own slang-server client. With
 # E2E_SLANG_ROUTE=extension they run through the slang VS Code extension 0.3.3 instead (copied to
-# ~/vaporview-test/tools/vscode-ext-slang, enabled with --extensions-dir).
+# the host folder E2E_SLANG_EXT_DIR, enabled with --extensions-dir). slang-server: on the host's PATH, or in
+# E2E_SLANG_SERVER_DIR.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 NAME="$(basename "$HERE")"
@@ -24,14 +25,15 @@ FSDB_DIR="${E2E_FSDB_DIR:-}"
 WISP_HELPER="${E2E_WISP_HELPER:-wisp-helper}"
 WCZ_TOOLS="${E2E_WCZ_TOOLS:-}"
 # vscode-port: E2E_FORMAT=fsdb|wcz|vcd (default fsdb): the dumps the tests open are the FSDB / WCZ twins under
-# E2E_FIXTURES_FMT_DIR (default ~/vaporview-test/fixtures-fmt on the host; made + content-checked by tools/fmt). A missing twin
+# E2E_FIXTURES_FMT_DIR (required for fsdb / wcz: their folder on the host; made + content-checked by tools/fmt). A missing twin
 # fails the test (test/e2e/suite/helpers.cjs), never a VCD fallback.
 #        tools/linux-test.sh fmt [FILTER]   runs the full suite with fsdb, then with wcz, and prints a SUMMARY per format
 #        (pass/fail counts + failing test names); full logs in test/e2e/out-fmt/<format>.log. Exit 1 if any format fails.
 FORMAT="${E2E_FORMAT:-fsdb}"
-FMT_DIR="${E2E_FIXTURES_FMT_DIR:-\$HOME/vaporview-test/fixtures-fmt}"
+if [ "$FORMAT" = vcd ]; then FMT_DIR="${E2E_FIXTURES_FMT_DIR:-}"; else
+  FMT_DIR="${E2E_FIXTURES_FMT_DIR:?set E2E_FIXTURES_FMT_DIR to the FSDB / WCZ twins folder on the host (tools/fmt), or E2E_FORMAT=vcd}"; fi
 # vscode-port: link-add-perf's big FSDB (bigsoc 1.7 GB) and its 100 signal paths; the test prints SKIP if missing
-BIG_FSDB="${E2E_BIG_FSDB:-\$HOME/vaporview-test/demo/remote-big/bigsoc-big.fsdb}"; BIG_PATHS="${E2E_BIG_PATHS:-\$HOME/vaporview-test/demo/remote-big/add100.txt}"
+BIG_FSDB="${E2E_BIG_FSDB:-}"; BIG_PATHS="${E2E_BIG_PATHS:-}"
 TRACE_BIG_VCD="${E2E_TRACE_BIG_VCD:-}"   # (the xr design for 1M cycles; trace-wisp's big case SKIPs without it)
 if [ "${1:-}" = fmt ]; then
   shift; out="$HERE/test/e2e/out-fmt"; mkdir -p "$out"; frc=0
@@ -76,9 +78,9 @@ if [ -e "$HERE/.git" ]; then ssh -o BatchMode=yes "$HOST" "cd $REMOTE_DIR && { [
 ssh -o BatchMode=yes "$HOST" "cd $REMOTE_DIR && rm -rf \"\${PWD:?}/test/visual/out\" && \
   ( [ -d node_modules/@vscode/test-electron ] && [ package-lock.json -ot node_modules/.package-lock.json ] || nice -n 19 npm ci --no-audit --no-fund --ignore-scripts >/dev/null 2>&1 ) && \
   mkdir -p ../.vscode-test-cache && ln -sfn ../.vscode-test-cache .vscode-test && \
-  PATH=\$HOME/vaporview-test/tools/slang-server-0.3.1:\$PATH E2E_SLANG_ROUTE='${E2E_SLANG_ROUTE:-}' \
-  E2E_EXTENSIONS_DIR=\$( [ '${E2E_SLANG_ROUTE:-}' = extension ] && echo \$HOME/vaporview-test/tools/vscode-ext-slang ) \
-  VAPORVIEW_CMUX_CACHE=\$HOME/vaporview-test/.cache/vaporview-cmux E2E_VISUAL='$VISUAL' E2E_FILTER='${1:-}' E2E_FSDB_DIR=\"$FSDB_DIR\" E2E_WISP_HELPER=\"$WISP_HELPER\" E2E_WCZ_TOOLS=\"$WCZ_TOOLS\" E2E_TRACE_BIG_VCD=\"$TRACE_BIG_VCD\" E2E_NOSRC='${E2E_NOSRC:-}' E2E_WORKSPACE='${E2E_WORKSPACE:-}' E2E_DEMO_BIG=\"${E2E_DEMO_BIG:-}\" E2E_DEMO_UNDUMPED='${E2E_DEMO_UNDUMPED:-}' E2E_DEMO_COMPUTED_BP=\"${E2E_DEMO_COMPUTED_BP:-}\" E2E_EXCLUDE='${E2E_EXCLUDE:-}' E2E_DEMO_LINE_BP='${E2E_DEMO_LINE_BP:-}' E2E_DEMO_LINE_DUMP='${E2E_DEMO_LINE_DUMP:-}' E2E_DEMO_LINE_SLANG='${E2E_DEMO_LINE_SLANG:-}' E2E_FORMAT='$FORMAT' E2E_FIXTURES_FMT_DIR=\"$FMT_DIR\" E2E_BIG_FSDB=\"$BIG_FSDB\" E2E_ADDS_FSDB=\"${E2E_ADDS_FSDB:-}\" E2E_ADDS_WCZ=\"${E2E_ADDS_WCZ:-}\" E2E_BIG_PATHS=\"$BIG_PATHS\" E2E_CLOSE_MEM_FSDB=\"${E2E_CLOSE_MEM_FSDB:-}\" E2E_CLOSE_MEM_WCZ=\"${E2E_CLOSE_MEM_WCZ:-}\" nice -n 19 ${E2E_CORES:+taskset -c $E2E_CORES }timeout -k 15 ${E2E_TIMEOUT:-900} xvfb-run -a -s '-screen 0 1600x1000x24' node test/e2e/run.mjs 2>&1 | grep -v -E 'Gtk-WARNING|dbus|libva|Fontconfig|AgentHost|ChatModelSelection|AccountPolicyGate|^\s*$' | tail -${E2E_TAIL:-80}; exit \${PIPESTATUS[0]}" || rc=$?
+  PATH=${E2E_SLANG_SERVER_DIR:+$E2E_SLANG_SERVER_DIR:}\$PATH E2E_SLANG_ROUTE='${E2E_SLANG_ROUTE:-}' \
+  E2E_EXTENSIONS_DIR=\$( [ '${E2E_SLANG_ROUTE:-}' = extension ] && echo '${E2E_SLANG_EXT_DIR:?set E2E_SLANG_EXT_DIR for E2E_SLANG_ROUTE=extension}' ) \
+  VAPORVIEW_CMUX_CACHE=\$HOME/$REMOTE_DIR/.cache/vaporview-cmux E2E_VISUAL='$VISUAL' E2E_FILTER='${1:-}' E2E_FSDB_DIR=\"$FSDB_DIR\" E2E_WISP_HELPER=\"$WISP_HELPER\" E2E_WCZ_TOOLS=\"$WCZ_TOOLS\" E2E_TRACE_BIG_VCD=\"$TRACE_BIG_VCD\" E2E_NOSRC='${E2E_NOSRC:-}' E2E_WORKSPACE='${E2E_WORKSPACE:-}' E2E_DEMO_BIG=\"${E2E_DEMO_BIG:-}\" E2E_DEMO_UNDUMPED='${E2E_DEMO_UNDUMPED:-}' E2E_DEMO_COMPUTED_BP=\"${E2E_DEMO_COMPUTED_BP:-}\" E2E_EXCLUDE='${E2E_EXCLUDE:-}' E2E_DEMO_LINE_BP='${E2E_DEMO_LINE_BP:-}' E2E_DEMO_LINE_DUMP='${E2E_DEMO_LINE_DUMP:-}' E2E_DEMO_LINE_SLANG='${E2E_DEMO_LINE_SLANG:-}' E2E_FORMAT='$FORMAT' E2E_FIXTURES_FMT_DIR=\"$FMT_DIR\" E2E_BIG_FSDB=\"$BIG_FSDB\" E2E_ADDS_FSDB=\"${E2E_ADDS_FSDB:-}\" E2E_ADDS_WCZ=\"${E2E_ADDS_WCZ:-}\" E2E_BIG_PATHS=\"$BIG_PATHS\" E2E_CLOSE_MEM_FSDB=\"${E2E_CLOSE_MEM_FSDB:-}\" E2E_CLOSE_MEM_WCZ=\"${E2E_CLOSE_MEM_WCZ:-}\" nice -n 19 ${E2E_CORES:+taskset -c $E2E_CORES }timeout -k 15 ${E2E_TIMEOUT:-900} xvfb-run -a -s '-screen 0 1600x1000x24' node test/e2e/run.mjs 2>&1 | grep -v -E 'Gtk-WARNING|dbus|libva|Fontconfig|AgentHost|ChatModelSelection|AccountPolicyGate|^\s*$' | tail -${E2E_TAIL:-80}; exit \${PIPESTATUS[0]}" || rc=$?
 if [ -n "$VISUAL" ]; then
   if [ "${UPDATE_BASELINES:-}" != 1 ]; then ssh -o BatchMode=yes "$HOST" "cd $REMOTE_DIR && node test/visual/diff.mjs" || rc=1; fi
   mkdir -p "$HERE/test/visual/out"

@@ -7,8 +7,8 @@ project by its authors and is not derived from another project, except for the t
 which is kept with its original headers under its own terms. No vendor software, headers or libraries are included,
 linked or loaded: FSDB files are decoded by the code in convert/fsdb/.
 
-This directory is the exact source of the wisp-helper binaries in the VaporView FSDB 0.1.0 VSIX files
-(archi-max/wcz commit c407403cba51abafdd6c88541605d40cb8232542, no patches; build id 7cde573ac63ad956). It holds
+wisp-helper is part of this repository. This directory is the exact source of the wisp-helper binaries in the
+VaporView FSDB 0.1.0 VSIX files (build id 7cde573ac63ad956). It holds
 the files the helper build compiles, plus its build scripts (Makefile, helper/build.sh), documents and checks.
 
 Files with no SPDX line (licence texts, documents, word lists) are covered by this notice, MIT:
