@@ -38,6 +38,10 @@ The extension keeps upstream VaporView's `vaporview.*` ids, so only one of the t
   alt="VaporView FSDB on the CVA6 core: the SystemVerilog source, Trace Driver showing the statement that set
   alu_valid_q at 13,430 ns with its branch and inputs, and the waveform below.">
 
+## Performance
+
+A 10 GB FSDB opens to values in about 14 s: from the open command until three signals show their values at the cursor, in VS Code 1.148 on a 16-core Linux x86-64 host limited to 4 CPU cores, with the file already in the OS file cache (median of 3 fresh-window runs; VS Code's own start-up, about 3 s, not included; a first read from disk was not measured and will be slower).
+
 ## Features
 
 ### FSDB and WCZ

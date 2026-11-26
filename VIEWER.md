@@ -16,7 +16,7 @@ and contributors), moved out of README.md for VaporView FSDB . -->
 - Remote waveform viewing via VScode SSH and surfer surver
 - IDE integration with other language extensions
 
-VaporView FSDB reads FSDB and WCZ through wisp-helper (see Platforms above), not through the upstream FSDB addon. For use of other waveform dump formats such as LXT, VZT, GTKwave offers conversion tools. Proprietary formats such as WLF and VPD can also be converted, but require you to compile GTKwave. See the [GTKwave Manual](https://gtkwave.sourceforge.net/gtkwave.pdf) for details - page 16, and 69 for an overview.
+VaporView FSDB reads FSDB and WCZ through wisp-helper (see Platforms in the README), not through the upstream FSDB addon. For use of other waveform dump formats such as LXT, VZT, GTKwave offers conversion tools. Proprietary formats such as WLF and VPD can also be converted, but require you to compile GTKwave. See the [GTKwave Manual](https://gtkwave.sourceforge.net/gtkwave.pdf) for details - page 16, and 69 for an overview.
 
 WDB formats can now be converted directly to FST files using [wdbcvt](https://github.com/filmil/wdbcvt).
 
@@ -152,6 +152,13 @@ When log files are opened in the terminal, the viewer will automatically parse o
 
 Finding a particular transition or a value in a waveform is done in relation to the selected signal and the marker (similar to how Visual Studio Code handles search in relation to the text cursor)
 
+Value search finds exact values in the signal's current format:
+
+- **Hexadecimal:** an `x` digit matches any value of that nibble.
+- **Binary:** `x` and `z` match literally.
+- **Decimal and signed decimal:** exact values.
+- **RISC-V rows:** the search text is a regular expression over the instruction text.
+
 ## Value Formatting
 
 The viewer can display values in different number formats. To change the value format, right click on the signal in the viewer and select **Format Values** -> and select the value format you wish to display. Note that some values have limitations when displaying values with non-2-state bits in them, and will fall back to displaying the value as Binary. For details see the table below:
@@ -167,6 +174,13 @@ The viewer can display values in different number formats. To change the value f
 | ASCII          | ❌ No                 | Left              |
 | Epoch Time (ns)| ❌ No                 | Left              |
 | Enum           | ❌ No                 | Left              |
+| RISC-V instruction | ❌ No             | Left              |
+
+RISC-V rows (**Format Values** -> **RISC-V**) show a 32-bit or 16-bit value as its disassembled instruction, with ABI or x0-x31 register names, and with or without pseudo-instructions.
+
+### Value Aliases
+
+**Load Value Alias File...** loads a table of names for values from a `.alias` or `.rc` file, JSON or CSV. **Format Values** -> **Alias Table...** shows a signal through one of the loaded tables, and **Remove Alias** takes it off again. Saved sessions remember the alias files they use.
 
 ## Waveform Color
 
