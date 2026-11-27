@@ -6,7 +6,11 @@
 # /build, CARGO_HOME to /cargo), so the output is the same from any directory and any user.
 # Usage: tools/wellen/build-wasm.sh <work dir> [--unpatched] [--install]
 #   --install copies the result to target/wasm32-unknown-unknown/release/filehandler.wasm (where esbuild.js and
-#   the VSIX take it from). Expected SHA-1 of the patched build: 5375b64ce3ef089af7bd3a85554824343ba28467.
+#   the VSIX take it from).
+# Expected SHA-1 of the patched build, by build host (rustc's host triple: cargo's crate metadata, and so the mangled
+# symbol hashes in the wasm, depend on it; the code is the same). tools/wellen/wasm-pin.sh reads these lines:
+#   aarch64-apple-darwin 5375b64ce3ef089af7bd3a85554824343ba28467 (the build the release VSIXes ship)
+#   x86_64-unknown-linux-gnu d54dc3926f45d5ec6ffdae1f7e070d74b770511e
 # Needs: Rust 1.93.1 with the wasm32-unknown-unknown target; wellen 0.25.7 and the crates in Cargo.lock in
 # cargo's registry (or network). Prints the wasm's path and SHA-1. Run it under nice.
 set -euo pipefail

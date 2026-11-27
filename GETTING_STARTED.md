@@ -23,7 +23,9 @@ node esbuild.js           # -> dist/
 
 `npm run compile-wasm` generates `src/wellen_parser/filehandler.ts` from the `.wit` interface (`npm run
 generate:model`) and builds the WebAssembly reader with `tools/wellen/build-wasm.sh`. That build is reproducible:
-it remaps paths, so the wasm has the same SHA-1 on every machine, and the script checks it against the pinned one.
+it remaps paths, so the wasm has the same SHA-1 on every machine of the same kind, and the script checks it against
+the pin for your build host (macOS arm64 and Linux x86-64 are pinned; the bytes differ between them only in symbol
+hashes). Another SHA-1 is a warning: that wasm works the same, but `tools/package.sh` needs the pinned one.
 `npm run compile-wasm-dev` runs a plain `cargo build` instead (faster to iterate on, but its output is not the
 shipped file).
 

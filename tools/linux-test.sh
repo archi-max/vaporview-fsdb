@@ -58,7 +58,7 @@ VISUAL=""; if [ "${1:-}" = visual ]; then VISUAL=1; shift; fi
 # The wellen wasm must be the reproducible patched build (tools/wellen/build-wasm.sh): other bytes may embed
 # builder home paths or lack the split-bit fix, and tests on them prove nothing about what ships.
 WASM="$HERE/target/wasm32-unknown-unknown/release/filehandler.wasm"
-WANT=5375b64ce3ef089af7bd3a85554824343ba28467
+WANT=$(bash "$HERE/tools/wellen/wasm-pin.sh")   # the pin for the host that builds the bundles (this one)
 GOT="$(shasum "$WASM" 2>/dev/null | cut -d' ' -f1)"
 if [ "$GOT" != "$WANT" ]; then
   echo "E2E FAIL: $WASM SHA-1 is '${GOT:-missing}', expected $WANT (rebuild: tools/wellen/build-wasm.sh <dir> --install)" >&2

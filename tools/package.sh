@@ -39,13 +39,16 @@ for f in target/wasm32-unknown-unknown/release/filehandler.wasm src/wellen_parse
   [ -e "$f" ] || { echo "missing $f (run npm ci, then npm run compile-wasm)"; exit 2; }
 done
 # the wellen wasm must be the reproducible build (tools/wellen/build-wasm.sh remaps paths; another build carries the
-# builder's home paths). Its expected SHA-1 is in that script; any other wasm is rebuilt (needs Rust + the wasm target).
+# builder's home paths), pinned per build host (tools/wellen/wasm-pin.sh; the release VSIXes are built on
+# aarch64-apple-darwin); any other wasm is rebuilt (needs Rust + the wasm target).
 WASM=target/wasm32-unknown-unknown/release/filehandler.wasm
-WASM_SHA1=$(sed -n 's/.*Expected SHA-1 of the patched build: \([0-9a-f]*\).*/\1/p' tools/wellen/build-wasm.sh)
+WASM_SHA1=$(bash tools/wellen/wasm-pin.sh); WASM_HOST=$(bash tools/wellen/wasm-pin.sh --host)
+[ -n "$WASM_SHA1" ] || { echo "no pinned wellen wasm SHA-1 for build host $WASM_HOST (pinned hosts: $(sed -n 's/^#   \([a-z0-9_-]*\) [0-9a-f]\{40\}.*/\1/p' tools/wellen/build-wasm.sh | tr '\n' ' '); see tools/wellen/build-wasm.sh)"; exit 2; }
 if [ "$(shasum "$WASM" | cut -d' ' -f1)" != "$WASM_SHA1" ]; then
-  say "filehandler.wasm is not the reproducible build ($WASM_SHA1): rebuilding"
+  say "filehandler.wasm is not the reproducible build for $WASM_HOST ($WASM_SHA1): rebuilding"
   nice -n 10 tools/wellen/build-wasm.sh "$CACHE/wasm-build" --install | tail -2
-  [ "$(shasum "$WASM" | cut -d' ' -f1)" = "$WASM_SHA1" ] || { echo "wasm rebuild gave another SHA-1"; exit 2; }
+  G=$(shasum "$WASM" | cut -d' ' -f1)
+  [ "$G" = "$WASM_SHA1" ] || { echo "wasm rebuild gave SHA-1 $G, not the pinned $WASM_SHA1 for $WASM_HOST"; exit 2; }
 fi
 NAME=$(node -p "require('./package.json').name"); VERSION=$(node -p "require('./package.json').version")
 # every VSIX traces to a commit: BUILD-INFO.txt (in the VSIX) names this checkout's commit and whether the tree had
