@@ -2679,7 +2679,7 @@
     "build": "npm run compile",
     "compile-wasm": "npm run generate:model && bash tools/wellen/ensure-wasm.sh",
     "compile-wasm-dev": "npm run generate:model && cargo build --target wasm32-unknown-unknown --release",
-    "generate:model": "wit2ts --outDir ./src/wellen_parser ./src/wellen_parser",
+    "generate:model": "wit2ts --outDir ./src/wellen_parser ./src/wellen_parser && bash tools/wellen/check-model.sh",
     "compile-addon": "node-gyp rebuild",
     "compile": "npm run compile-wasm && npm run check-types && node esbuild.js",
     "compile-fsdb": "npm run compile-addon && npm run compile-wasm && npm run check-types && node esbuild.js",
