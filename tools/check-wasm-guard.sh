@@ -6,7 +6,8 @@
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")/.." && pwd)"; cd "$HERE"
 WASM=target/wasm32-unknown-unknown/release/filehandler.wasm
-WANT=$(sed -n 's/^WANT=//p' tools/wellen/ensure-wasm.sh)
+WANT=$(bash tools/wellen/wasm-pin.sh)   # this build host's pin
+[ -n "$WANT" ] || { echo "FAIL no pinned wasm SHA-1 for build host $(bash tools/wellen/wasm-pin.sh --host)"; exit 1; }
 BAK=$(mktemp "${TMPDIR:-/tmp}/wasm-guard.XXXXXX"); cp "$WASM" "$BAK"
 trap 'cp "$BAK" "$WASM"; rm -f "$BAK"' EXIT
 sha() { shasum "$WASM" | cut -d' ' -f1; }

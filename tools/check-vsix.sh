@@ -53,10 +53,12 @@ for VSIX in "$@"; do
     # vendor words are allowed in text that explains the Verdi features and the FSDB setting descriptions, not in binaries
     if [ -n "$hit" ] && file "$W/$f" | grep -qE 'ELF|Mach-O|PE32'; then bad "vendor name inside binary $f: $hit"; fi
   done <<< "$LIST"
-  # 6. the wellen wasm is the reproducible build (SHA-1 from tools/wellen/ensure-wasm.sh)
-  WANT_WASM=$(sed -n 's/^WANT=//p' "$(dirname "$0")/wellen/ensure-wasm.sh" 2>/dev/null)
+  # 6. the wellen wasm is the reproducible build of a pinned build host (tools/wellen/wasm-pin.sh --all; the VSIX may
+  #    have been built on another host than the one checking it)
+  PINS=$(bash "$(dirname "$0")/wellen/wasm-pin.sh" --all 2>/dev/null)
   GOT_WASM=$(shasum "$W/extension/target/wasm32-unknown-unknown/release/filehandler.wasm" 2>/dev/null | cut -d' ' -f1)
-  if [ -z "$WANT_WASM" ] || [ "$GOT_WASM" != "$WANT_WASM" ]; then bad "filehandler.wasm SHA-1 ${GOT_WASM:-missing} is not the reproducible build ${WANT_WASM:-?}"; else echo "wasm SHA-1 $GOT_WASM (reproducible build)"; fi
+  PIN_HOST=$(awk -v s="${GOT_WASM:-none}" '$2 == s {print $1; exit}' <<< "$PINS")
+  if [ -z "$PIN_HOST" ]; then bad "filehandler.wasm SHA-1 ${GOT_WASM:-missing} is not a pinned reproducible build ($(tr '\n' ' ' <<< "$PINS"))"; else echo "wasm SHA-1 $GOT_WASM (reproducible build, $PIN_HOST)"; fi
   # 5. native programs: dependencies and glibc floor
   while IFS= read -r f; do
     file "$W/$f" | grep -q ELF || continue
